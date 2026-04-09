@@ -1,0 +1,22 @@
+#% ifndef _CHECK_VNAME_SHT
+#% define _CHECK_VNAME_SHT	1
+
+########
+# Check variable name is in portable character set
+# Arguments:
+#   $1  variable name
+# Return:
+#    0  no errors
+#    1  error
+# Input:
+#   none
+# Output:
+#   none
+########
+
+check_vname () {
+    case "$1" in
+	( '' | '_' | [!A-Za-z_]* | [A-Za-z_]*[!A-Za-z0-9_]* ) return 1 ;;
+    esac
+}
+#% endif

@@ -1,0 +1,109 @@
+#!/bin/sh
+
+# Program name
+PROG="${0##*/}"
+
+#% include "local.sht"
+#% include "cmd.sht"
+#% include "err.sht"
+
+####
+
+# Print usage information
+usage () {
+    ! printf "Usage: %s [options] PATH\n" "${PROG}"
+}
+
+# Print help information
+usage_help () {
+    usage
+    cat << EOF
+
+    -f file	input file name (default: ${DEF_INFILE})
+    -o outfile	output file name (default: ${DEF_OUTFILE})
+
+    PATH	path to local working directory
+EOF
+    exit 0
+}
+
+####
+
+# Parse command line options
+get_options () {
+    local opt=""
+
+    case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
+    while getopts ":f:o:" opt ; do
+	case "${opt}" in
+	    ( 'f' ) INFILE="${OPTARG}" ;;
+	    ( 'o' ) OUTFILE="${OPTARG}" ;;
+	    ( ':' ) err "missing argument for option -- '${OPTARG}'" || usage ;;
+	    ( '?' ) err "unknown option -- '${OPTARG}'" || usage ;;
+	    (  *  ) err "no handler for option '${opt}'" ;;
+	esac || return 1
+    done
+    shift $(( OPTIND - 1 ))
+    case "$#" in
+	( 0 ) err "too few arguments" ;;
+	( 1 ) LOCALDIR="$1" ;;
+	( * ) err "too many arguments" ;;
+    esac || usage
+}
+
+####
+
+#% include "mkdeploy.sht"
+
+####
+
+# Initialization subroutine
+init () {
+    DEF_INFILE="Deployfile"	# Default input file name
+    DEF_OUTFILE="deploy.sh"	# Default output file name
+    INFILE="${DEF_INFILE}"	# Input file name
+    OUTFILE="${DEF_OUTFILE}"	# Output file name
+    LOCALDIR=""			# Local working directory
+}
+
+# Startup subroutine
+startup () {
+    # Check input file
+    case "${INFILE}" in ( '-' ) INFILE="" ;; esac
+    test -n "${INFILE}" || err "empty input file name" || return 1
+
+    # Check working directory
+    test -n "${LOCALDIR}" || err "empty working directory" || return 1
+
+    # Check output file
+    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
+    if test -n "${OUTFILE}" ; then
+	# If output file is set then try to create it
+	( : > "${OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${OUTFILE}'" || return 1
+	exec 1> "${OUTFILE}"	# Open output file
+    fi
+}
+
+# Clean up the staff and exit with error
+clean_fail () {
+    test -n "${OUTFILE}" && cmd rm -f "${OUTFILE}"
+    fail "${1:-1}"
+}
+
+# Exit with error code
+fail () {
+    exit "${1:-1}"
+}
+
+####
+
+# Main subroutine
+main () {
+    init && get_options "$@" && startup || fail
+    trap 'clean_fail 130' HUP INT TERM
+    mkdeploy || clean_fail
+}
+
+# Call main subroutine
+main "$@"

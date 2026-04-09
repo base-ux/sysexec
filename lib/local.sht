@@ -1,0 +1,21 @@
+#% ifndef _LOCAL_SHT
+#% define _LOCAL_SHT	1
+
+# Unset all aliases
+'unalias' -a
+
+# Ensure 'command' is not a user function
+unset -f command
+
+# Disable pathname expansion
+set -o noglob
+
+# Turn on alias expanding for bash
+if command -v shopt >/dev/null ; then
+    case "$(shopt)" in ( *expand_aliases* ) shopt -s expand_aliases ;; esac
+fi
+
+# Use shell dependent 'local' definition
+alias local="$(command -v typeset || command -v local)"
+#%
+#% endif

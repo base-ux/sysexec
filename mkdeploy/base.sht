@@ -1,0 +1,103 @@
+#!/bin/sh
+
+# Unset all aliases
+'unalias' -a
+
+# Ensure 'command' is not a user function
+unset -f command
+
+# Disable pathname expansion
+set -o noglob
+
+# Turn on alias expanding for bash
+if command -v shopt >/dev/null ; then
+    case "$(shopt)" in ( *expand_aliases* ) shopt -s expand_aliases ;; esac
+fi
+
+# Use shell dependent 'local' definition
+alias local="$(command -v typeset || command -v local)"
+
+# Compare source and destination files, replace and set mode if needed
+# Source file is deleted after process
+compare_replace () {
+    local src="$1"		# Source file
+    local dst="$2"		# Destination file
+    local mode="$3"		# File mode for destination file
+    local rc=0			# Return code
+    local move=""		# Flag if replace is needed
+
+    test -n "${src}" && test -n "${dst}" || return 1	# src and dst are required
+
+    test -e "${dst}" || move="yes"		# Just move if not exist
+    test -z "${move}" && test -f "${dst}" &&	# Compare only if destination is file
+    {
+	cmp -s "${src}" "${dst}"
+	case "$?" in
+	    ( 1 ) move="yes" ;;			# rc remains 0
+	    ( * ) rc=$? ;;			# rc=2 if cmp is finished with errors
+	esac
+    }
+
+    if test ${rc} -eq 0 && test -n "${move}" ; then
+	mv -f "${src}" "${dst}" || rc=$?
+	if test ${rc} -eq 0 && test -n "${mode}" ; then
+	    chmod "${mode}" "${dst}" || rc=$?
+	fi
+    fi
+    rm -f "${src}" || rc=$?
+    return ${rc}
+}
+
+# Deploy file contents provided by callback function output to specified file
+deploy_file () {
+    local callback="$1"		# Callback function
+    local src="$2"		# "Source file name" for callback output
+    local dest="$3"		# Destination file name if set
+    local mode="$4"		# File mode for destination file
+    local dir=""		# Directory part of destination path
+    local file=""		# File part of destination path
+    local path=""		# Destination path
+    local tpath=""		# Source path where callback output is written
+
+    test -n "${callback}" && test -n "${src}" &&	# Required parameters
+    case "${dest}" in
+	( /* ) ;;					# Absolute path
+	( * ) dest="${WORKDIR%/}/${dest:-"${src}"}" ;;	# Relative path
+    esac &&
+    dir="${dest%/*}" && file="${dest##*/}" &&		# Divide path
+    test -n "${dir}" && test -n "${file}" &&		# Check for empty parts
+    # Normalize directory path and try to create necessary directories
+    dir="$(mkdir -p -- "${dir}" && cd -- "${dir}" && pwd)" || return 1
+
+    # Combine destination path and check for correctness
+    # (the path either doesn't exist at all or is file)
+    path="${dir%/}/${file}"
+    test -f "${path}" || ! test -e "${path}" || return 1
+    # Determine temporary ("source") file
+    tpath="${path}.$$"
+    while test -e "${tpath}" ; do tpath="${tpath}.$$" ; done
+    # Finally call the callback function, write output and put result in place
+    "${callback}" > "${tpath}" &&
+	compare_replace "${tpath}" "${path}" "${mode}" || return 1
+}
+
+# Set and export WORKDIR variable
+set_workdir () {
+    local wdir="$1"	# New working dir
+
+    test -n "${wdir}" &&
+    case "${wdir}" in
+	( /* ) ;;				# Absolute path
+	( * ) wdir="${WORKDIR%/}/${wdir}" ;;	# Relative to current WORKDIR
+    esac &&
+    mkdir -p "${wdir}" &&
+    cd "${wdir}" &&
+    WORKDIR="$(pwd)" &&		# Set to normalized absolute path
+    export WORKDIR
+}
+
+main () {
+    set_workdir "${HOME:-/}"
+}
+
+main "$@" || exit 1
