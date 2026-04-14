@@ -1,0 +1,344 @@
+#% include "local.sht"
+#% include "cmd.sht"
+#% include "err.sht"
+#% include "check_vname.sht"
+
+####
+
+# Add file name and line number for processed file in errors
+errx () {
+    err "${INFILE}: ${LINENO}: $*"
+}
+
+# Left trim spaces from the string
+ltrim () {
+    local s="$*"
+    local d=""
+
+    case "${s}" in
+	( [[:space:]]* ) d="${s%%[![:space:]]*}" ;;
+    esac
+    printf "%s" "${s#"${d}"}"
+}
+
+# Normalize directory for absolute path
+normalize_dir () {
+    local dir="$1"
+
+    dir="$(cmd cd -- "${dir}" && pwd)" || return 1
+    printf "%s" "${dir}"
+}
+
+####
+
+# Set TOKEN variable to the next token in line
+next_token () {
+    local rest=""
+    local char=""
+    local mode=""
+
+    TOKEN=""
+    LINE="$(ltrim "${LINE}")"
+    case "${LINE}" in
+	( \#* ) LINE="" ;;	# Skip comments to the rest of line
+    esac
+    while test -n "${LINE}" ; do
+	# Get next character
+	rest="${LINE#?}"
+	char="${LINE%"${rest}"}"
+	LINE="${rest}"
+	case "${mode}" in
+	    ( '' )
+		case "${char}" in
+		    ( \\ ) mode="bs" ;;
+		    ( \' ) mode="sq" ;;
+		    ( \" ) mode="dq" ;;
+		    ( [[:space:]] ) test -n "${mode}" || break ;;
+		esac
+		;;
+	    ( 'sq' )	# Single quote
+		case "${char}" in
+		    ( \' ) mode="" ;;
+		esac
+		;;
+	    ( 'dq' )	# Double quote
+		case "${char}" in
+		    ( \\ ) mode="db" ;;
+		    ( \" ) mode="" ;;
+		esac
+		;;
+	    ( 'db' ) mode="dq" ;;	# Backslash in double quoted string
+	    ( 'bs' ) mode="" ;;		# Backslash in unquoted string
+	esac
+	TOKEN="${TOKEN}${char}"
+    done
+    test -z "${mode}" || errx "unterminated token: ${TOKEN}"
+}
+
+####
+
+# Print header for function
+func_header () {
+    printf '\n%s_function_%s () {\n' "${CONTEXT}" "${CTXLINE}"
+}
+
+# Print footer for function
+func_footer () {
+    printf '}\n%s_function_%s || exit 1\n' "${CONTEXT}" "${CTXLINE}"
+}
+
+####
+
+# Process one DEPLOY record and generate blob and deploy functions
+process_blob () {
+    local fname="$1"
+    local fdest="$2"
+    local fmode="$3"
+    local fdir=""
+    local ffile="${fname}"
+    local fpath=""
+    local funcname=""
+    local bfunc=""
+    local eof=""
+
+    case "${ffile}" in
+	( \"*\" | \'*\' ) ffile="${ffile#?}" ; ffile="${ffile%?}" ;;
+    esac
+    case "${ffile}" in
+	( */* ) fdir="${ffile%/*}" ; ffile="${ffile##*/}" ;;
+	( * ) fdir="${LOCALDIR}" ;;
+    esac
+    case "${fdir}" in
+	( /* ) fdir="$(normalize_dir "${fdir}")" ;;
+	( * )  fdir="$(normalize_dir "${LOCALDIR%/}/${fdir}")" ;;
+    esac || errx "can't access directory for: ${fname}" || return 1
+    case "${fdir}" in
+	( "${LOCALDIR}" | "${LOCALDIR%/}"/* ) ;;
+	( * ) errx "${fname} is not under ${LOCALDIR}" || return 1 ;;
+    esac
+    fpath="${fdir%/}/${ffile}"
+    test -f "${fpath}" || errx "can't find file: ${fname}" || return 1
+    test -r "${fpath}" || errx "can't read file: ${fname}" || return 1
+
+    funcname="${CONTEXT}_function_${CTXLINE}_${BLOB_NUM:=0}"
+    bfunc="blob_${funcname}"
+    eof="EOF_${bfunc}"
+    printf '\n'
+    printf '%s () {\n' "${bfunc}"
+    printf "\tcat << '%s'\n" "${eof}"
+    cmd cat "${fpath}"
+    printf '%s\n' "${eof}"
+    printf '}\n'
+    BLOB_NUM=$(( BLOB_NUM + 1 ))
+
+    printf '\n'
+    printf '%s () {\n' "${funcname}"
+    printf '\t_BLOB=%s &&\n' "${bfunc}"
+    printf '\t_SRC=%s  &&\n' "${fpath#"${LOCALDIR%/}/"}"
+    printf '\t_DEST=%s &&\n' "${fdest}"
+    printf '\t_MODE=%s &&\n' "${fmode}"
+    printf '\tdeploy_file "${_BLOB}" "${_SRC}" "${_DEST}" "${_MODE}" &&\n'
+    printf '\tunset _BLOB _SRC _DEST _MODE\n'
+    printf '}\n'
+    printf '%s || exit 1\n' "${funcname}"
+}
+
+pre_DEPLOY () {
+    BLOB_NUM=0
+}
+
+post_DEPLOY () {
+    :
+}
+
+process_DEPLOY () {
+    local fname=""
+    local fdest=""
+    local fmode=""
+
+    while test -n "${LINE}" ; do
+	next_token || return 1
+	test -n "${TOKEN}" || break
+	test -z "${fname}" && fname="${TOKEN}" && continue
+	case "${TOKEN}" in
+	    ( 'AS' )
+		test -z "${fdest}" || errx "extra AS keyword" || return 1
+		next_token || return 1
+		test -n "${TOKEN}" || errx "empty AS argument" || return 1
+		fdest="${TOKEN}"
+		;;
+	    ( 'MODE' )
+		test -z "${fmode}" || errx "extra MODE keyword" || return 1
+		next_token || return 1
+		test -n "${TOKEN}" || errx "empty MODE argument" || return 1
+		fmode="${TOKEN}"
+		case "${fmode}" in
+		    ( [0-7] | [0-7][0-7] | [0-7][0-7][0-7] ) ;;
+		    ( * ) errx "wrong MODE argument: ${fmode}" || return 1 ;;
+		esac
+		;;
+	    ( * ) errx "unknown keyword: ${TOKEN}" || return 1 ;;
+	esac
+    done
+    if test -n "${fname}" ; then
+	process_blob "${fname}" "${fdest}" "${fmode}" || return 1
+    fi
+}
+
+####
+
+pre_ENV () {
+    func_header
+}
+
+post_ENV () {
+    func_footer
+}
+
+process_ENV () {
+    local var=""
+    local val=""
+
+    while test -n "${LINE}" ; do
+	next_token || return 1
+	test -n "${TOKEN}" || break
+	case "${TOKEN}" in
+	    ( *'='* )
+		var="${TOKEN%%=*}"
+		check_vname "${var}" ||
+		    errx "illegal variable name: '${var}'" || return 1
+		val="${TOKEN#*=}"
+		printf '\t%s=%s &&\n' "${var}" "${val}"
+		printf '\texport %s ||\n' "${var}"
+		printf '\treturn 1\n'
+		;;
+	    ( * ) errx "not an assignment: ${TOKEN}" || return 1 ;;
+	esac
+    done
+}
+
+####
+
+pre_RUN () {
+    func_header
+    printf "sh -s << 'EOF_RUN_%s'\n" "${CTXLINE}"
+}
+
+post_RUN () {
+    printf '\nEOF_RUN_%s\n' "${CTXLINE}"
+    func_footer
+}
+
+process_RUN () {
+    printf '%s\n' "${LINE}"
+}
+
+####
+
+pre_WORKDIR () {
+    WDIR=""
+    func_header
+}
+
+post_WORKDIR () {
+    func_footer
+}
+
+process_WORKDIR () {
+    while test -n "${LINE}" ; do
+	next_token || return 1
+	test -n "${TOKEN}" || break
+	test -z "${WDIR}" ||
+	    errx "extra arguments for WORKDIR instruction: ${TOKEN}" || return 1
+	WDIR="${TOKEN}"
+	printf '\t_WDIR=%s &&\n' "${WDIR}"
+	printf '\tset_workdir "${_WDIR}" &&\n'
+	printf '\tunset _WDIR\n'
+    done
+}
+
+####
+
+# Parse one line from input stream
+parse_line () {
+    if test -z "${CONTEXT}" ; then
+	next_token || return 1
+	case "${TOKEN}" in
+	    ( 'DEPLOY' | 'ENV' | 'RUN' | 'WORKDIR' ) ;;
+	    ( * ) errx "unknown instruction '${TOKEN}'" || return 1 ;;
+	esac
+	CONTEXT="${TOKEN}" ; CTXLINE="${LINENO}"
+	case "$(ltrim "${LINE}")" in
+	    ( '{{' | '{{'[[:space:]]* )
+		next_token	# Skip {{
+		case "$(ltrim "${LINE}")" in
+		    ( '' | \#* ) "pre_${CONTEXT}" ;;
+		    ( * ) errx "unexpected symbols after {{" || return 1 ;;
+		esac
+		;;
+	    ( * )
+		"pre_${CONTEXT}" &&
+		    "process_${CONTEXT}" &&
+		    "post_${CONTEXT}" &&
+		    CONTEXT=""
+		;;
+	esac && return 0 || return 1
+    fi
+    case "$(ltrim "${LINE}")" in
+	( '}}' | '}}'[[:space:]]* )
+	    next_token		# Skip }}
+	    case "$(ltrim "${LINE}")" in
+		( '' | \#* ) "post_${CONTEXT}" && CONTEXT="" ;;
+		( * ) errx "unexpected symbols after }}" ;;
+	    esac
+	    ;;
+	( * ) "process_${CONTEXT}" ;;
+    esac && return 0 || return 1
+}
+
+# Print base script
+blob_base_sh () {
+    cat << 'EOF_blob_base_sh'
+#% include "base.sht"
+EOF_blob_base_sh
+}
+
+# Main mkdeploy function
+mkdeploy () {
+    # Check and set required variables
+    case "${INFILE}" in
+	( */* ) : "${LOCALDIR:="${INFILE%/*}/"}" ;;
+	( * ) : "${INFILE:="Deployfile"}" "${LOCALDIR:=.}" ;;
+    esac
+    # Check file and normalize local directory
+    test -f "${INFILE}" || err "can't find file: ${INFILE}" || return 1
+    test -r "${INFILE}" || err "can't read file: ${INFILE}" || return 1
+    LOCALDIR="$(normalize_dir "${LOCALDIR}" ||
+	err "unaccessible directory: ${LOCALDIR}")" || return 1
+
+    # Reset used global variables
+    LINE=""
+    LINENO=0
+    CONTEXT=""
+    CTXLINE=0
+    TOKEN=""
+    WDIR=""
+    BLOB_NUM=""
+
+    # Print base.sh
+    blob_base_sh
+
+    # Process input file
+    while IFS= read -r LINE ; do
+	LINENO=$(( LINENO + 1 ))
+	if test -z "${CONTEXT}" ; then
+	    case "$(ltrim "${LINE}")" in
+		( '' | '#'* ) continue ;;	# Skip empty lines and comments
+	    esac
+	fi
+	parse_line || return 1
+    done < "${INFILE}"
+    if test -n "${CONTEXT}" ; then
+	errx "unexpected end of file (context: ${CONTEXT})" || return 1
+    fi
+}

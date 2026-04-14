@@ -1,0 +1,19 @@
+#% ifndef _ERR_SHT
+#% define _ERR_SHT	1
+
+########
+# Print error message
+# Arguments:
+#   $*  message to print
+# Return:
+#   none
+# Input:
+#   none
+# Output:
+#   none
+########
+
+err () {
+    ! printf "%s: error: %s\n" "${PROG:-"$0"}" "$*" >&2
+}
+#% endif

@@ -1,0 +1,20 @@
+#% ifndef _CMD_SHT
+#% define _CMD_SHT	1
+
+########
+# Execute command and discard stderr
+# Arguments:
+#   $@  command and arguments
+# Return:
+#    0  no errors
+#   >0  error code from executed command
+# Input:
+#   none
+# Output:
+#   none
+########
+
+cmd () {
+    command ${1+"$@"} 2>/dev/null
+}
+#% endif

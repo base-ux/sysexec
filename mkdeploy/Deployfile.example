@@ -1,0 +1,27 @@
+## Set workdir
+
+#WORKDIR	arg
+
+## Set variables
+
+#ENV	var=val [ var=val ... ]
+#ENV {{
+#	var=val
+#	...
+#}}
+
+## Deploy files
+
+#DEPLOY	local [ AS remote ] [ MODE mode ]
+#DEPLOY {{
+#	local [ AS remote ] [ MODE mode ]
+#	...
+#}}
+
+## Run commands
+
+#RUN	cmd
+#RUN {{
+#	cmd
+#	...
+#}}
