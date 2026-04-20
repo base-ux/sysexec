@@ -1,0 +1,41 @@
+#% include "local.sht"
+#% include "err.sht"
+
+# Check if $1 is readable file
+check_file () {
+    test -f "$1" && test -r "$1" || return 1
+}
+
+# Embedded main 'hostlist' awk program
+hostlist_awk () {
+    cat << 'EOF_hostlist_awk'
+#% include "hostlist.awk"
+EOF_hostlist_awk
+}
+
+# Main hostlist function
+hostlist () {
+    local awk=""
+    local file=""
+
+    # Check for awk executable
+    awk="$(command -v "${AWK:-awk}")"
+    test -n "${awk}" || err "can't find 'awk' program" || return 1
+
+    # Check passed files for existance
+    for file in "$@" ; do
+	# Skip checking for empty file name and for stdin ('-')
+	case "${file}" in ( '' | '-' ) continue ;; esac
+	check_file "${file}" || err "can't open file '${file}'" || return 1
+    done
+
+    # Run main 'hostlist' awk program with given variables
+    # If no parameters (file names) passed to function awk will read stdin
+    "${awk}" \
+	-v MASK="${HOSTLIST_MASK}" \
+	-v REGEX="${HOSTLIST_REGEX}" \
+	-v GRP="${HOSTLIST_GRP}" \
+	-v OFLAG="${HOSTLIST_OFLAG}" \
+	"$(hostlist_awk)" \
+	${1+"$@"}
+}

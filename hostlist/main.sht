@@ -1,0 +1,138 @@
+#!/bin/sh
+
+# Program name
+PROG="${0##*/}"
+
+#% include "local.sht"
+#% include "err.sht"
+
+####
+
+# Return the string quoted with single quotes
+squote () {
+    local s="$*"
+    local h=""		# Head of string
+    local t=""		# Tail of string
+
+    case "${s}" in
+	( *\'* )
+	    t="${s}" ; s=""
+	    while : ; do
+		case "${t}" in
+		    ( *\'* )
+			h="${t%%\'*}'" ; t="${t#"${h}"}" ; s="${s}${h}\\''" ;;
+		    ( * ) s="${s}${t}" ; break ;;
+		esac
+	    done
+	    ;;
+    esac
+    printf "'%s'" "${s}"
+}
+
+####
+
+# Print usage information
+usage () {
+    printf "Usage: %s -f file [ -f file ... ]\n" "${PROG}"
+    printf "\t[ -g | -G | -R ] [ -o] [ -m mask ... ] [ -r regex ...]\n"
+    return 1
+}
+
+# Print help information
+usage_help () {
+    usage
+    cat << EOF
+
+    -f file	input file name
+
+    -m mask	filter by mask
+    -r regex	filter by regular expression (ERE)
+    -o		use common only entries for multiple filters
+
+    -g		print groups
+    -G		print groups for groups
+    -R		print parent groups for hosts or groups
+
+    Multiple '-f' options can be specified. Use '-' as file name for stdin.
+
+    Filters are defined for hosts and/or groups. If pattern begins with '%',
+    it is considered as group, otherwise as host.
+    For 'mask' the symbol '?' is a pattern that match any character and
+    '*' is a pattern that match any string including the null string.
+EOF
+    exit 0
+}
+
+####
+
+add_filelist () {
+    FILELIST="${FILELIST:+"${FILELIST} "}$(squote "$1")"
+}
+
+add_mask () {
+    HOSTLIST_MASK="${HOSTLIST_MASK:+"${HOSTLIST_MASK}\\n"}$1"
+}
+
+add_regex () {
+    HOSTLIST_REGEX="${HOSTLIST_REGEX:+"${HOSTLIST_REGEX}\\n"}$1"
+}
+
+# Parse command line options
+get_options () {
+    local opt=""
+
+    case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
+    while getopts ":GRgf:m:or:" opt ; do
+	case "${opt}" in
+	    ( 'G' ) HOSTLIST_GRP="child" ;;
+	    ( 'R' ) HOSTLIST_GRP="parent" ;;
+	    ( 'g' ) HOSTLIST_GRP="group" ;;
+	    ( 'f' ) add_filelist "${OPTARG}" ;;
+	    ( 'm' ) add_mask "${OPTARG}" ;;
+	    ( 'o' ) HOSTLIST_OFLAG="true" ;;
+	    ( 'r' ) add_regex "${OPTARG}" ;;
+	    ( ':' ) err "missing argument for option -- '${OPTARG}'" || usage ;;
+	    ( '?' ) err "unknown option -- '${OPTARG}'" || usage ;;
+	    (  *  ) err "no handler for option '${opt}'" ;;
+	esac || return 1
+    done
+    shift $(( OPTIND - 1 ))
+    case "$#" in
+	( 0 ) test -n "${FILELIST}" || err "too few arguments" ;;
+	( * ) err "too many arguments" ;;
+    esac || usage
+}
+
+####
+
+#% include "hostlist.sht"
+
+####
+
+# Initialization subroutine
+init () {
+    HOSTLIST_MASK=""
+    HOSTLIST_REGEX=""
+    HOSTLIST_GRP=""
+    HOSTLIST_OFLAG=""
+    FILELIST=""
+}
+
+# Exit with error code
+fail () {
+    exit "${1:-1}"
+}
+
+####
+
+# Main subroutine
+main () {
+    init &&
+	get_options "$@" &&
+	eval "set -- ${FILELIST}" &&
+	hostlist "$@" ||
+	fail
+}
+
+# Call main subroutine
+main "$@"
