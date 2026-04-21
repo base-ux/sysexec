@@ -10,22 +10,16 @@ PROG="${0##*/}"
 
 # Return the string quoted with single quotes
 squote () {
-    local s="$*"
     local h=""		# Head of string
-    local t=""		# Tail of string
+    local t="$*"	# Tail of string
+    local s=""		# Result string
 
-    case "${s}" in
-	( *\'* )
-	    t="${s}" ; s=""
-	    while : ; do
-		case "${t}" in
-		    ( *\'* )
-			h="${t%%\'*}'" ; t="${t#"${h}"}" ; s="${s}${h}\\''" ;;
-		    ( * ) s="${s}${t}" ; break ;;
-		esac
-	    done
-	    ;;
-    esac
+    while : ; do
+	case "${t}" in
+	    ( *\'* ) h="${t%%\'*}'" ; t="${t#"${h}"}" ; s="${s}${h}\\''" ;;
+	    ( * ) s="${s}${t}" ; break ;;
+	esac
+    done
     printf "'%s'" "${s}"
 }
 
