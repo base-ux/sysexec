@@ -1,18 +1,7 @@
 #% ifndef _ERR_SHT
 #% define _ERR_SHT	1
 
-########
-# Print error message
-# Arguments:
-#   $*  message to print
-# Return:
-#   none
-# Input:
-#   none
-# Output:
-#   none
-########
-
+# Print error message and return non-zero status
 err () {
     ! printf "%s: error: %s\n" "${PROG:-"$0"}" "$*" >&2
 }
