@@ -1,6 +1,7 @@
 #% include "local.sht"
 #% include "cmd.sht"
 #% include "err.sht"
+#% include "check_file.sht"
 #% include "check_vname.sht"
 
 ####
@@ -117,8 +118,7 @@ process_blob () {
 	( * ) errx "${fname} is not under ${LOCALDIR}" || return 1 ;;
     esac
     fpath="${fdir%/}/${ffile}"
-    test -f "${fpath}" || errx "can't find file: ${fname}" || return 1
-    test -r "${fpath}" || errx "can't read file: ${fname}" || return 1
+    check_file "${fpath}" || errx "can't open file: ${fname}" || return 1
 
     funcname="${CONTEXT}_function_${CTXLINE}_${BLOB_NUM:=0}"
     bfunc="blob_${funcname}"
@@ -311,8 +311,7 @@ mkdeploy () {
 	( * ) : "${INFILE:="Deployfile"}" "${LOCALDIR:=.}" ;;
     esac
     # Check file and normalize local directory
-    test -f "${INFILE}" || err "can't find file: ${INFILE}" || return 1
-    test -r "${INFILE}" || err "can't read file: ${INFILE}" || return 1
+    check_file "${INFILE}" || err "can't open file: ${INFILE}" || return 1
     LOCALDIR="$(normalize_dir "${LOCALDIR}" ||
 	err "unaccessible directory: ${LOCALDIR}")" || return 1
 

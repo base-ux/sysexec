@@ -1,10 +1,6 @@
 #% include "local.sht"
 #% include "err.sht"
-
-# Check if $1 is readable file
-check_file () {
-    test -f "$1" && test -r "$1" || return 1
-}
+#% include "check_file.sht"
 
 # Embedded main 'hostlist' awk program
 hostlist_awk () {
