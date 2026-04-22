@@ -83,6 +83,10 @@ startup () {
 	    err "can't create output file '${OUTFILE}'" || return 1
 	exec 1> "${OUTFILE}"	# Open output file
     fi
+
+    # Set mkdeploy API variables
+    MKDEPLOY_FILE="${INFILE}"
+    MKDEPLOY_DIR="${LOCALDIR}"
 }
 
 # Clean up the staff and exit with error

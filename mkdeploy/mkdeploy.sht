@@ -8,7 +8,7 @@
 
 # Add file name and line number for processed file in errors
 errx () {
-    err "${INFILE}: ${LINENO}: $*"
+    err "${INFILE}: ${LINE_NUM}: $*"
 }
 
 # Left trim spaces from the string
@@ -267,7 +267,7 @@ parse_line () {
 	    ( 'DEPLOY' | 'ENV' | 'RUN' | 'WORKDIR' ) ;;
 	    ( * ) errx "unknown instruction '${TOKEN}'" || return 1 ;;
 	esac
-	CONTEXT="${TOKEN}" ; CTXLINE="${LINENO}"
+	CONTEXT="${TOKEN}" ; CTXLINE="${LINE_NUM}"
 	case "$(ltrim "${LINE}")" in
 	    ( '{{' | '{{'[[:space:]]* )
 		next_token	# Skip {{
@@ -304,7 +304,7 @@ EOF_blob_base_sh
 }
 
 # Main mkdeploy function
-mkdeploy () {
+mkdeploy_main () {
     # Check and set required variables
     case "${INFILE}" in
 	( */* ) : "${LOCALDIR:="${INFILE%/*}/"}" ;;
@@ -317,7 +317,7 @@ mkdeploy () {
 
     # Reset used global variables
     LINE=""
-    LINENO=0
+    LINE_NUM=0
     CONTEXT=""
     CTXLINE=0
     TOKEN=""
@@ -329,7 +329,7 @@ mkdeploy () {
 
     # Process input file
     while IFS= read -r LINE ; do
-	LINENO=$(( LINENO + 1 ))
+	LINE_NUM=$(( LINE_NUM + 1 ))
 	if test -z "${CONTEXT}" ; then
 	    case "$(ltrim "${LINE}")" in
 		( '' | '#'* ) continue ;;	# Skip empty lines and comments
@@ -340,4 +340,15 @@ mkdeploy () {
     if test -n "${CONTEXT}" ; then
 	errx "unexpected end of file (context: ${CONTEXT})" || return 1
     fi
+}
+
+mkdeploy () {
+    # Run the main function in a subshell to be able to override
+    # global variables with the same names
+    (
+	# Translate API variables to internal names
+	INFILE="${MKDEPLOY_FILE}"
+	LOCALDIR="${MKDEPLOY_DIR}"
+	mkdeploy_main
+    )
 }
