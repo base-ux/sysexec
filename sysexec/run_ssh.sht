@@ -1,0 +1,110 @@
+#% include "err.sht"
+#% include "check_file.sht"
+
+################
+
+# Print error message and return non-zero status
+err () {
+    ! printf "%s: error: %s\n" "${PROG:-"$0"}" "$*" >&2
+}
+
+
+# Check if $1 is readable file
+check_file () {
+    test -f "$1" && test -r "$1" || return 1
+}
+
+################
+
+# Execute commands on remote host from stdin
+exec_ssh () {
+    test -n "${SSH_HOST}" || return 1
+    "${SSH:-/usr/bin/ssh}" \
+	-o ConnectTimeout="${SSH_TIMEOUT:-10}" \
+	-o ControlMaster="${SSH_MASTER:-auto}" \
+	-o ControlPath="${SSH_CTLPATH:-"${HOME}/%C"}" \
+	-o ControlPersist="${SSH_PERSIST:-60s}" \
+	-o KbdInteractiveAuthentication="${SSH_KBD:-no}" \
+	-o PasswordAuthentication="${SSH_PWD:-no}" \
+	-o Port="${SSH_PORT:-22}" \
+	-o "${SSH_RCMD:+"RemoteCommand=${SSH_RCMD}"}" \
+	-o RequestTTY="${SSH_REQTTY:-no}" \
+	-o StrictHostKeyChecking="${SSH_STRICT:-no}" \
+	-o User="${SSH_USER:-"${USER}"}" \
+	-o UserKnownHostsFile="${SSH_KNOWNHOSTS:-/dev/null}" \
+	${1+"$@"} \
+	"${SSH_HOST}"
+}
+
+# Establish connection to remote host
+connect_ssh () {
+    { exec_ssh -n -N -O check || exec_ssh -f -n -N || return $? ; } >/dev/null 2>&1
+}
+
+# Determine if remote shell is available
+set_ssh_rcmd () {
+    #SSH_RCMD='test -n "$SHELL" && "$SHELL" -c "printf OK"'
+    SSH_RCMD="/bin/sh -c 'printf OK'"
+    case "$(exec_ssh -n 2>/dev/null)" in
+	( 'OK' ) SSH_RCMD="/bin/sh -s" ;;
+	(  *   ) SSH_RCMD="" ;;
+    esac
+}
+
+# Main run_ssh function
+run_ssh_main () {
+    # Check for ssh executable
+    : "${SSH:="$(command -v ssh)"}"
+    test -n "${SSH}" || err "can't find 'ssh' program" || return 1
+
+    # Check required variables
+    test -n "${SSH_HOST}" || err "remote host is not set" || return 1
+    test -n "${INFILE}" || err "input file is not set" || return 1
+    check_file "${INFILE}" || err "can't open file: ${INFILE}" || return 1
+
+    # Establish the connection
+    connect_ssh && set_ssh_rcmd || return 1
+
+    # Process output file if defined
+    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
+    if test -n "${OUTFILE}" ; then
+	# If output file is set then try to create it
+	( : > "${OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${OUTFILE}'" || return 1
+	exec 1> "${OUTFILE}"	# Open output file
+    fi
+    exec 0< "${INFILE}"		# Open input file
+
+    # Execute commands from file
+    exec_ssh	# Ignore error status from ssh
+
+    # Close file descriptors
+    test -n "${OUTFILE}" && exec 1>&-
+    exec 0<&-
+}
+
+# API function for run_ssh
+run_ssh () {
+    # Run the main function in a subshell to be able to override
+    # global variables with the same names
+    (
+	# Translate API variables to internal names
+	SSH_HOST="${RUN_SSH_HOST}"
+	SSH_PORT="${RUN_SSH_PORT}"
+	SSH_USER="${RUN_SSH_USER}"
+	INFILE="${RUN_SSH_INFILE}"
+	OUTFILE="${RUN_SSH_OUTFILE}"
+	run_ssh_main
+    )
+}
+
+################
+
+main () {
+    RUN_SSH_HOST="$1"
+    RUN_SSH_INFILE="$2"
+    RUN_SSH_OUTFILE="$3"
+    run_ssh
+}
+
+main "$@"
