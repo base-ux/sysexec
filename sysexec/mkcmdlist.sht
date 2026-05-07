@@ -23,7 +23,7 @@ check_file () {
 ################
 
 # Main mkcmdlist function
-mkcmdlist_main () {
+mkcmdlist () {
     local e=""
     local v=""
 
@@ -44,15 +44,42 @@ mkcmdlist_main () {
     done
 }
 
-# API function for mkcmdlist
-# $1 is output file
-mkcmdlist () {
-    test -n "${CMDLIST}" || err "command list is not set" || return 1
+# Main mkhstlist function
+mkhstlist () {
+    local e=""
+    local v=""
+
+    eval "set -- ${HSTLIST}"
+    for e in "$@" ; do
+	case "${e}" in
+	    ( [!HL]* | [HL] | [HL]*[!0-9]* ) continue ;;	# Skip garbage
+	esac
+	eval "v=\"\${HSTLIST_${e}}\""
+	test -n "${v}" || continue	# Skip empty values
+	case "${e}" in
+	    ( 'H'* ) printf "%s\n" "${v}" ;;
+	    ( 'L'* )
+		check_file "${v}" && cmd cat "${v}" ||
+		    err "can't open file: ${v}" || return 1
+		;;
+	esac
+    done
+}
+
+# Create list
+# $1 is type of list
+# $2 is output file
+mklist () {
+    case "$1" in
+	( 'cmd' ) test -n "${CMDLIST}" || err "command list is not set" ;;
+	( 'hst' ) test -n "${HSTLIST}" || err "host list is not set" ;;
+	( * ) err "unknown list type" ;;
+    esac || return 1
     # Run the main function in a subshell to be able to override
     # global variables with the same names and redirect input/output
     (
 	rc=0	# Return code
-	OUTFILE="$1"
+	OUTFILE="$2"
 	case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
 	if test -n "${OUTFILE}" ; then
 	    # If output file is set then try to create it
@@ -62,7 +89,10 @@ mkcmdlist () {
 	fi
 
 	# Call main function
-	mkcmdlist_main || rc=$?
+	case "$1" in
+	    ( 'cmd' ) mkcmdlist ;;
+	    ( 'hst' ) mkhstlist ;;
+	esac || rc=$?
 
 	# Close file descriptors
 	test -n "${OUTFILE}" && exec 1>&-
@@ -74,9 +104,7 @@ mkcmdlist () {
 ################
 
 main () {
-    f="$1" ; shift
-    CMDLIST="$*"
-    mkcmdlist "${f}"
+    mklist "$@"
 }
 
 main "$@"
