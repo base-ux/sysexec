@@ -1,0 +1,152 @@
+#!/bin/sh
+
+# Program name
+PROG="${0##*/}"
+
+#% include "local.sht"
+#% include "cmd.sht"
+#% include "err.sht"
+
+####
+
+# Print usage information
+usage () {
+    ! cat << EOF
+Usage: ${PROG} [options] [-u user] [-h host]... [-l listfile]...
+	{ [-e command]... [-f cmdfile]... | command }
+EOF
+}
+
+# Print help information
+usage_help () {
+    usage
+    cat << EOF
+
+    Execute commands on remote host
+
+    Main options:
+    -u user	user to login to the hosts (default: current user)
+    -h host	host where the commands to be executed
+    -l listfile	file with the list of hosts where the commands to be executed
+    -e command	command to be executed on the hosts
+    -f cmdfile	file with the list of commands to be executed on the hosts
+
+    Either combination of '-h' and '-l' flags should be set.
+    Either combination of '-e' and '-f' flags or just 'command' should be set.
+EOF
+    exit 0
+}
+
+####
+
+# $1 variable name
+# $2 value
+# $3 separator (default 'space')
+add_to_var () {
+    eval "$1=\"\${$1:+\"\${$1}${3:- }\"}$2\""
+}
+
+# $1 list variable name
+# $2 marker for list
+# $3 value
+add_to_list () {
+    eval "$1_$2=\"$3\""
+    add_to_var "$1" "$2"
+}
+
+# Parse command line options
+get_options () {
+    local opt=""
+
+    case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
+    while getopts ":e:f:h:l:u:" opt ; do
+	case "${opt}" in
+	    ( 'e' ) add_to_list "CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
+	    ( 'f' ) add_to_list "CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
+	    ( 'h' ) add_to_list "HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
+	    ( 'l' ) add_to_list "HSTLIST" "L${OPTIND}" "${OPTARG}" ;;
+	    ( 'u' ) SYSEXEC_USER="${OPTARG}" ;;
+	    ( ':' ) err "missing argument for option -- '${OPTARG}'" || usage ;;
+	    ( '?' ) err "unknown option -- '${OPTARG}'" || usage ;;
+	    (  *  ) err "no handler for option '${opt}'" ;;
+	esac || return 1
+    done
+    shift $(( OPTIND - 1 ))
+    if test -n "$*" ; then
+	test -z "${CMDLIST}" ||
+	    err "'-e' and '-f' options are mutually exclusive with 'command'" ||
+	    return 1
+	add_to_list "CMDLIST" "E${OPTIND}" "$*"
+    fi
+}
+
+####
+
+sysexec () {
+    :
+}
+
+####
+
+# Initialization subroutine
+init () {
+    # Initialize variables
+    : "${RANDOM:=$(cmd date +%s)}"	# Workaround for dash
+    : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
+    WORKDIR="${XDG_STATE_HOME}/sysexec"
+    W_CMDLIST="${WORKDIR}/cmdlist.${RANDOM}.$$"
+    W_HSTLIST="${WORKDIR}/hstlist.${RANDOM}.$$"
+    CMDLIST=""
+    SSH="$(command -v ssh)"
+
+    # Defaults
+    SYSEXEC_USER="${USER:-$(cmd id -un)}"
+}
+
+# Startup subroutine
+startup () {
+    # Check 'ssh' executable
+    test -n "${SSH}" || err "'ssh' executable not found"
+
+    # Check user
+    test -n "${SYSEXEC_USER}" || err "empty user name is set" || return 1
+
+    # Check host list
+    test -n "${HSTLIST}" || err "neither 'host' nor 'listfile' are set" || return 1
+
+    # Check command list
+    test -n "${CMDLIST}" || err "neither 'command' nor 'cmdfile' are set" || return 1
+
+    # Try to create working directory
+    test -d "${WORKDIR}" || ( umask 0077 ; cmd mkdir -p "${WORKDIR}" ) ||
+	err "can't create working directory" || return 1
+}
+
+# Clean up the staff
+cleanup () {
+    cmd rm -f "${W_CMDLIST}" "${W_HSTLIST}"
+}
+
+# Clean up the staff and exit with error
+clean_fail () {
+    cleanup
+    fail "${1:-1}"
+}
+
+# Exit with error code
+fail () {
+    exit "${1:-1}"
+}
+
+####
+
+# Main subroutine
+main () {
+    init && get_options "$@" && startup || fail
+    trap 'clean_fail 130' HUP INT TERM
+    sysexec || clean_fail
+    cleanup
+}
+
+# Call main subroutine
+main "$@"
