@@ -82,8 +82,25 @@ get_options () {
 
 ####
 
+#% include "mklist.sht"
+#% include "run_ssh.sht"
+
+####
+
 sysexec () {
-    :
+    local host=""
+
+    mklist "hst" "${W_HSTLIST}" && mklist "cmd" "${W_CMDLIST}" || return 1
+    test -s "${W_HSTLIST}" || err "resulting host list is empty" || return 1
+    test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
+
+    while read -r host ; do
+	# Set API variables and call run_ssh
+	RUN_SSH_HOST="${host}"
+	RUN_SSH_USER="${SYSEXEC_USER}"
+	RUN_SSH_INFILE="${W_CMDLIST}"
+	run_ssh
+    done < "${W_HSTLIST}"
 }
 
 ####
@@ -97,6 +114,7 @@ init () {
     W_CMDLIST="${WORKDIR}/cmdlist.${RANDOM}.$$"
     W_HSTLIST="${WORKDIR}/hstlist.${RANDOM}.$$"
     CMDLIST=""
+    HSTLIST=""
     SSH="$(command -v ssh)"
 
     # Defaults
