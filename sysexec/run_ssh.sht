@@ -15,13 +15,12 @@ exec_ssh () {
 	-o KbdInteractiveAuthentication="${SSH_KBD:-no}" \
 	-o PasswordAuthentication="${SSH_PWD:-no}" \
 	-o Port="${SSH_PORT:-22}" \
-	-o "${SSH_RCMD:+"RemoteCommand=${SSH_RCMD}"}" \
 	-o RequestTTY="${SSH_REQTTY:-no}" \
 	-o StrictHostKeyChecking="${SSH_STRICT:-no}" \
 	-o User="${SSH_USER:-"${USER}"}" \
 	-o UserKnownHostsFile="${SSH_KNOWNHOSTS:-/dev/null}" \
-	${1+"$@"} \
-	"${SSH_HOST}"
+	${1+"$@"} -- \
+	"${SSH_HOST}" "${SSH_RCMD}"
 }
 
 # Establish connection to remote host
@@ -31,7 +30,6 @@ connect_ssh () {
 
 # Determine if remote shell is available
 set_ssh_rcmd () {
-    #SSH_RCMD='test -n "$SHELL" && "$SHELL" -c "printf OK"'
     SSH_RCMD="/bin/sh -c 'printf OK'"
     case "$(exec_ssh -n 2>/dev/null)" in
 	( 'OK' ) SSH_RCMD="/bin/sh -s" ;;
@@ -50,6 +48,8 @@ run_ssh_main () {
     test -n "${INFILE}" || err "input file is not set" || return 1
     check_file "${INFILE}" || err "can't open file: ${INFILE}" || return 1
 
+    # Reset variable with remote command before connection
+    SSH_RCMD=""
     # Establish the connection
     connect_ssh && set_ssh_rcmd || return 1
 
