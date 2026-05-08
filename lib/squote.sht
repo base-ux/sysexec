@@ -1,0 +1,18 @@
+#% ifndef _SQUOTE_SHT
+#% define _SQUOTE_SHT	1
+
+# Return the string quoted with single quotes
+squote () {
+    local h=""		# Head of string
+    local t="$*"	# Tail of string
+    local s=""		# Result string
+
+    while : ; do
+	case "${t}" in
+	    ( *\'* ) h="${t%%\'*}'" ; t="${t#"${h}"}" ; s="${s}${h}\\''" ;;
+	    ( * ) s="${s}${t}" ; break ;;
+	esac
+    done
+    printf "'%s'" "${s}"
+}
+#% endif
