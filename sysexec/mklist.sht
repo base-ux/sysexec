@@ -5,6 +5,10 @@
 #% include "cmd.sht"
 #% include "err.sht"
 #% include "check_file.sht"
+#% include "add_to_var.sht"
+#% include "squote.sht"
+
+#% include "hostlist.sht"
 
 # Main mkcmdlist function
 mkcmdlist () {
@@ -32,6 +36,7 @@ mkcmdlist () {
 mkhstlist () {
     local e=""
     local v=""
+    local list=""
 
     eval "set -- ${HSTLIST}"
     for e in "$@" ; do
@@ -43,11 +48,18 @@ mkhstlist () {
 	case "${e}" in
 	    ( 'H'* ) printf "%s\n" "${v}" ;;
 	    ( 'L'* )
-		check_file "${v}" && cmd cat "${v}" ||
-		    err "can't open file: ${v}" || return 1
+		case "${v}" in ( '-' ) continue ;; esac		# Skip stdin
+		add_to_var "list" "$(squote "${v}")"
 		;;
 	esac
     done
+    if test -n "${list}" ; then
+	# Reset 'hostlist' mode to 'host'
+	# Other 'hostlist' variables is set by main 'sysexec' script
+	HOSTLIST_GRP=""
+	eval "set -- ${list}"
+	hostlist "$@"
+    fi
 }
 
 # Create list
@@ -73,10 +85,7 @@ mklist () {
 	fi
 
 	# Call main function
-	case "$1" in
-	    ( 'cmd' ) mkcmdlist ;;
-	    ( 'hst' ) mkhstlist ;;
-	esac || rc=$?
+	"mk${1}list" || rc=$?
 
 	# Close file descriptors
 	test -n "${OUTFILE}" && exec 1>&-

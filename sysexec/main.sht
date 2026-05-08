@@ -6,6 +6,7 @@ PROG="${0##*/}"
 #% include "local.sht"
 #% include "cmd.sht"
 #% include "err.sht"
+#% include "add_to_var.sht"
 
 ####
 
@@ -33,18 +34,17 @@ usage_help () {
 
     Either combination of '-h' and '-l' flags should be set.
     Either combination of '-e' and '-f' flags or just 'command' should be set.
+
+    Other options:
+    -m mask	filter hosts from host list by mask
+    -r regex	filter hosts from host list by regular expression
+    -q		print the resulting list of hosts (no commands execution)
+    -v		print host name before execution
 EOF
     exit 0
 }
 
 ####
-
-# $1 variable name
-# $2 value
-# $3 separator (default 'space')
-add_to_var () {
-    eval "$1=\"\${$1:+\"\${$1}${3:- }\"}$2\""
-}
 
 # $1 list variable name
 # $2 marker for list
@@ -59,13 +59,17 @@ get_options () {
     local opt=""
 
     case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
-    while getopts ":e:f:h:l:u:" opt ; do
+    while getopts ":e:f:h:l:m:qr:u:v" opt ; do
 	case "${opt}" in
 	    ( 'e' ) add_to_list "CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
 	    ( 'f' ) add_to_list "CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
 	    ( 'h' ) add_to_list "HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
 	    ( 'l' ) add_to_list "HSTLIST" "L${OPTIND}" "${OPTARG}" ;;
+	    ( 'm' ) add_to_var "HOSTLIST_MASK" "${OPTARG}" '\\n' ;;
+	    ( 'q' ) SYSEXEC_PRINT="true" ;;
+	    ( 'r' ) add_to_var "HOSTLIST_REGEX" "${OPTARG}" '\\n' ;;
 	    ( 'u' ) SYSEXEC_USER="${OPTARG}" ;;
+	    ( 'v' ) SYSEXEC_VERBOSE="true" ;;
 	    ( ':' ) err "missing argument for option -- '${OPTARG}'" || usage ;;
 	    ( '?' ) err "unknown option -- '${OPTARG}'" || usage ;;
 	    (  *  ) err "no handler for option '${opt}'" ;;
@@ -87,6 +91,7 @@ get_options () {
 
 ####
 
+# Main sysexec function
 sysexec () {
     local host=""
 
@@ -94,7 +99,13 @@ sysexec () {
     test -s "${W_HSTLIST}" || err "resulting host list is empty" || return 1
     test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
 
+    if test -n "${SYSEXEC_PRINT}" ; then
+	cmd cat "${W_HSTLIST}"
+	return 0
+    fi
+
     while read -r host ; do
+	test -n "${SYSEXEC_VERBOSE}" && printf "%s\n" "${host}"
 	# Set API variables and call run_ssh
 	RUN_SSH_HOST="${host}"
 	RUN_SSH_USER="${SYSEXEC_USER}"
@@ -116,9 +127,15 @@ init () {
     CMDLIST=""
     HSTLIST=""
     SSH="$(command -v ssh)"
+    # Reset variables for 'hostlist'
+    HOSTLIST_MASK=""
+    HOSTLIST_REGEX=""
+    HOSTLIST_OFLAG=""
 
     # Defaults
+    SYSEXEC_PRINT=""
     SYSEXEC_USER="${USER:-$(cmd id -un)}"
+    SYSEXEC_VERBOSE=""
 }
 
 # Startup subroutine
