@@ -39,6 +39,8 @@ usage_help () {
     -C path	common search path for 'listfile' and 'cmdfile' (colon separated)
     -F path	search path for 'cmdfile' (colon separated)
     -L path	search path for 'listfile' (colon separated)
+    -B before	command to execute before processing
+    -A after	command to execute after processing
     -m mask	filter hosts from host list by mask
     -r regex	filter hosts from host list by regular expression
     -q		print the resulting list of hosts (no commands execution)
@@ -62,8 +64,10 @@ get_options () {
     local opt=""
 
     case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
-    while getopts ":C:F:L:e:f:h:l:m:qr:u:v" opt ; do
+    while getopts ":A:B:C:F:L:e:f:h:l:m:qr:u:v" opt ; do
 	case "${opt}" in
+	    ( 'A' ) SYSEXEC_AFTER_CMD="${OPTARG}" ;;
+	    ( 'B' ) SYSEXEC_BEFORE_CMD="${OPTARG}" ;;
 	    ( 'C' ) add_to_var "COMMON_PATH" "${OPTARG}" ':' ;;
 	    ( 'F' ) add_to_var "CMDLIST_PATH" "${OPTARG}" ':' ;;
 	    ( 'L' ) add_to_var "HSTLIST_PATH" "${OPTARG}" ':' ;;
@@ -101,15 +105,24 @@ get_options () {
 sysexec () {
     local host=""
 
+    # Create host and command lists
     mklist "hst" "${W_HSTLIST}" && mklist "cmd" "${W_CMDLIST}" || return 1
     test -s "${W_HSTLIST}" || err "resulting host list is empty" || return 1
     test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
 
+    # Just print the resulting hosts list
     if test -n "${SYSEXEC_PRINT}" ; then
 	cmd cat "${W_HSTLIST}"
 	return 0
     fi
 
+    # Run 'before' script
+    if test -n "${SYSEXEC_BEFORE_CMD}" ; then
+	"${SH}" -c "${SYSEXEC_BEFORE_CMD}" ||
+	    err "'before' command returned nonzero status" || return 1
+    fi
+
+    # Execute commands at remote hosts
     while read -r host ; do
 	test -n "${SYSEXEC_VERBOSE}" && printf "%s\n" "${host}"
 	# Set API variables and call run_ssh
@@ -118,15 +131,29 @@ sysexec () {
 	RUN_SSH_INFILE="${W_CMDLIST}"
 	run_ssh
     done < "${W_HSTLIST}"
+
+    # Run 'after' script
+    if test -n "${SYSEXEC_AFTER_CMD}" ; then
+	"${SH}" -c "${SYSEXEC_AFTER_CMD}" ||
+	    err "'after' command returned nonzero status" || return 1
+    fi
 }
 
 ####
 
 # Initialization subroutine
 init () {
+    local shell=""
+
     # Some common variables
     : "${RANDOM:=$(cmd date +%s)}"	# Workaround for dash
     : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
+
+    # Determine shell and ssh executables
+    SH=""
+    for shell in "/bin/sh" "/usr/bin/sh" "$(command -pv sh)" ; do
+	test -x "${shell}" && SH="${shell}" && break
+    done
     SSH="$(command -v ssh)"
 
     # Working directory and files
@@ -147,6 +174,8 @@ init () {
     HOSTLIST_OFLAG=""
 
     # Defaults
+    SYSEXEC_AFTER_CMD=""
+    SYSEXEC_BEFORE_CMD=""
     SYSEXEC_PRINT=""
     SYSEXEC_USER="${USER:-$(cmd id -un)}"
     SYSEXEC_VERBOSE=""
@@ -155,7 +184,14 @@ init () {
 # Startup subroutine
 startup () {
     # Check 'ssh' executable
-    test -n "${SSH}" || err "'ssh' executable not found"
+    test -n "${SSH}" || err "'ssh' executable not found" || return 1
+
+    # Check 'sh' executable
+    if test -n "${SYSEXEC_BEFORE_CMD}" ||
+	test -n "${SYSEXEC_AFTER_CMD}"
+    then
+	test -n "${SH}" || err "'sh' executable not found" || return 1
+    fi
 
     # Check user
     test -n "${SYSEXEC_USER}" || err "empty user name is set" || return 1
