@@ -36,6 +36,9 @@ usage_help () {
     Either combination of '-e' and '-f' flags or just 'command' should be set.
 
     Other options:
+    -C path	common search path for 'listfile' and 'cmdfile' (colon separated)
+    -F path	search path for 'cmdfile' (colon separated)
+    -L path	search path for 'listfile' (colon separated)
     -m mask	filter hosts from host list by mask
     -r regex	filter hosts from host list by regular expression
     -q		print the resulting list of hosts (no commands execution)
@@ -59,8 +62,11 @@ get_options () {
     local opt=""
 
     case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
-    while getopts ":e:f:h:l:m:qr:u:v" opt ; do
+    while getopts ":C:F:L:e:f:h:l:m:qr:u:v" opt ; do
 	case "${opt}" in
+	    ( 'C' ) add_to_var "COMMON_PATH" "${OPTARG}" ':' ;;
+	    ( 'F' ) add_to_var "CMDLIST_PATH" "${OPTARG}" ':' ;;
+	    ( 'L' ) add_to_var "HSTLIST_PATH" "${OPTARG}" ':' ;;
 	    ( 'e' ) add_to_list "CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
 	    ( 'f' ) add_to_list "CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
 	    ( 'h' ) add_to_list "HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
@@ -118,16 +124,24 @@ sysexec () {
 
 # Initialization subroutine
 init () {
-    # Initialize variables
+    # Some common variables
     : "${RANDOM:=$(cmd date +%s)}"	# Workaround for dash
     : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
+    SSH="$(command -v ssh)"
+
+    # Working directory and files
     WORKDIR="${XDG_STATE_HOME}/sysexec"
     W_CMDLIST="${WORKDIR}/cmdlist.${RANDOM}.$$"
     W_HSTLIST="${WORKDIR}/hstlist.${RANDOM}.$$"
+
+    # Variables for 'mklist'
     CMDLIST=""
     HSTLIST=""
-    SSH="$(command -v ssh)"
-    # Reset variables for 'hostlist'
+    CMDLIST_PATH=""
+    HSTLIST_PATH=""
+    COMMON_PATH=""
+
+    # Variables for 'hostlist'
     HOSTLIST_MASK=""
     HOSTLIST_REGEX=""
     HOSTLIST_OFLAG=""

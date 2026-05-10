@@ -10,10 +10,49 @@
 
 #% include "hostlist.sht"
 
+# Search file via XPATH directories
+search_xpath () {
+    local file="$1"
+    local xpath="${XPATH}"
+    local dir=""
+    local found=""
+
+    while test -n "${xpath}" ; do
+	case "${xpath}" in
+	    ( *':'* ) dir="${xpath%%:*}" ; xpath="${xpath#"${dir}:"}" ;;
+	    ( * ) dir="${xpath}" ; xpath="" ;;
+	esac
+	case "${dir}" in
+	    ( '~' ) dir="${HOME}" ;;
+	    ( '~/'* ) dir="${HOME}/${dir#"~/"}" ;;
+	esac
+	test -n "${dir}" &&
+	    test -f "${dir%/}/${file}" &&
+	    found="true" &&
+	    break	# Found
+    done
+    test -n "${found}" || return 1
+    printf "%s" "${dir%/}/${file}"
+}
+
+# Search file
+search_file () {
+    local file="$1"
+
+    test -n "${file}" || return 1
+    test -f "${file}" ||	# Check file "as is"
+    case "${file}" in
+	( /* ) return 1 ;;	# Absolute path
+	(  * ) file="$(search_xpath "${file}")" || return 1 ;;
+    esac
+    printf "%s" "${file}"
+}
+
 # Main mkcmdlist function
 mkcmdlist () {
     local e=""
     local v=""
+    local file=""
 
     eval "set -- ${CMDLIST}"
     for e in "$@" ; do
@@ -21,12 +60,14 @@ mkcmdlist () {
 	    ( [!EF]* | [EF] | [EF]*[!0-9]* ) continue ;;	# Skip garbage
 	esac
 	eval "v=\"\${CMDLIST_${e}}\""
-	test -n "${v}" || continue	# Skip empty values
+	test -n "${v}" || continue				# Skip empty values
 	case "${e}" in
 	    ( 'E'* ) printf "%s\n" "${v}" ;;
 	    ( 'F'* )
-		check_file "${v}" && cmd cat "${v}" ||
-		    err "can't open file: ${v}" || return 1
+		case "${v}" in ( '-' ) continue ;; esac		# Skip stdin
+		file="$(search_file "${v}")" || err "can't find file: ${v}" || return 1
+		check_file "${file}" && cmd cat "${file}" ||
+		    err "can't open file: ${file}" || return 1
 		;;
 	esac
     done
@@ -37,6 +78,7 @@ mkhstlist () {
     local e=""
     local v=""
     local list=""
+    local file=""
 
     eval "set -- ${HSTLIST}"
     for e in "$@" ; do
@@ -44,12 +86,14 @@ mkhstlist () {
 	    ( [!HL]* | [HL] | [HL]*[!0-9]* ) continue ;;	# Skip garbage
 	esac
 	eval "v=\"\${HSTLIST_${e}}\""
-	test -n "${v}" || continue	# Skip empty values
+	test -n "${v}" || continue				# Skip empty values
 	case "${e}" in
 	    ( 'H'* ) printf "%s\n" "${v}" ;;
 	    ( 'L'* )
 		case "${v}" in ( '-' ) continue ;; esac		# Skip stdin
-		add_to_var "list" "$(squote "${v}")"
+		file="$(search_file "${v}")" || err "can't find file: ${v}" || return 1
+		check_file "${file}" || err "can't open file: ${file}" || return 1
+		add_to_var "list" "$(squote "${file}")"
 		;;
 	esac
     done
@@ -83,6 +127,13 @@ mklist () {
 		err "can't create output file '${OUTFILE}'" || return 1
 	    exec 1> "${OUTFILE}"	# Open output file
 	fi
+
+	# Set XPATH variable
+	case "$1" in
+	    ( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
+	    ( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
+	esac
+	test -n "${COMMON_PATH}" && add_to_var "XPATH" "${COMMON_PATH}" ':'
 
 	# Call main function
 	"mk${1}list" || rc=$?
