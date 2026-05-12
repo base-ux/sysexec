@@ -59,7 +59,7 @@ mkcmdlist () {
 	case "${e}" in
 	    ( [!EF]* | [EF] | [EF]*[!0-9]* ) continue ;;	# Skip garbage
 	esac
-	eval "v=\"\${CMDLIST_${e}}\""
+	eval "v=\"\${${VPREFIX}_${e}}\""
 	test -n "${v}" || continue				# Skip empty values
 	case "${e}" in
 	    ( 'E'* ) printf "%s\n" "${v}" ;;
@@ -85,7 +85,7 @@ mkhstlist () {
 	case "${e}" in
 	    ( [!HL]* | [HL] | [HL]*[!0-9]* ) continue ;;	# Skip garbage
 	esac
-	eval "v=\"\${HSTLIST_${e}}\""
+	eval "v=\"\${${VPREFIX}_${e}}\""
 	test -n "${v}" || continue				# Skip empty values
 	case "${e}" in
 	    ( 'H'* ) printf "%s\n" "${v}" ;;
@@ -107,41 +107,54 @@ mkhstlist () {
 }
 
 # Create list
-# $1 is type of list
-# $2 is output file
-mklist () {
-    case "$1" in
+mklist_main () {
+    local rc=0	# Return code
+
+    case "${LISTTYPE}" in
 	( 'cmd' ) test -n "${CMDLIST}" || err "command list is not set" ;;
 	( 'hst' ) test -n "${HSTLIST}" || err "host list is not set" ;;
-	( * ) err "unknown list type" ;;
+	( * ) err "unknown list type '${LISTTYPE}'" ;;
     esac || return 1
+
+    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
+    if test -n "${OUTFILE}" ; then
+	# If output file is set then try to create it
+	( : > "${OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${OUTFILE}'" || return 1
+	exec 1> "${OUTFILE}"	# Open output file
+    fi
+
+    # Set XPATH variable
+    case "${LISTTYPE}" in
+	( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
+	( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
+    esac
+    test -n "${COMMON_PATH}" && add_to_var "XPATH" "${COMMON_PATH}" ':'
+
+    # Call main function
+    "mk${LISTTYPE}list" || rc=$?
+
+    # Close file descriptors
+    test -n "${OUTFILE}" && exec 1>&-
+
+    return ${rc}
+}
+
+# API function for mklist
+mklist () {
     # Run the main function in a subshell to be able to override
     # global variables with the same names and redirect input/output
     (
-	rc=0	# Return code
-	OUTFILE="$2"
-	case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
-	if test -n "${OUTFILE}" ; then
-	    # If output file is set then try to create it
-	    ( : > "${OUTFILE}" ) 2>/dev/null ||
-		err "can't create output file '${OUTFILE}'" || return 1
-	    exec 1> "${OUTFILE}"	# Open output file
-	fi
-
-	# Set XPATH variable
-	case "$1" in
-	    ( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
-	    ( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
-	esac
-	test -n "${COMMON_PATH}" && add_to_var "XPATH" "${COMMON_PATH}" ':'
-
-	# Call main function
-	"mk${1}list" || rc=$?
-
-	# Close file descriptors
-	test -n "${OUTFILE}" && exec 1>&-
-
-	return ${rc}
+	# Translate API variables to internal names
+	LISTTYPE="${MKLIST_TYPE}"
+	OUTFILE="${MKLIST_OUTFILE}"
+	CMDLIST="${MKLIST_CMDLIST}"
+	HSTLIST="${MKLIST_HSTLIST}"
+	CMDLIST_PATH="${MKLIST_FPATH}"
+	HSTLIST_PATH="${MKLIST_LPATH}"
+	COMMON_PATH="${MKLIST_CPATH}"
+	VPREFIX="${MKLIST_VPREFIX}"
+	mklist_main
     )
 }
 #% endif

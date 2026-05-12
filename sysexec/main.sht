@@ -55,7 +55,7 @@ EOF
 # $2 marker for list
 # $3 value
 add_to_list () {
-    eval "$1_$2=\"$3\""
+    eval "${SYSEXEC_VPREFIX}_$2=\"$3\""
     add_to_var "$1" "$2"
 }
 
@@ -68,16 +68,16 @@ get_options () {
 	case "${opt}" in
 	    ( 'A' ) SYSEXEC_AFTER_CMD="${OPTARG}" ;;
 	    ( 'B' ) SYSEXEC_BEFORE_CMD="${OPTARG}" ;;
-	    ( 'C' ) add_to_var "COMMON_PATH" "${OPTARG}" ':' ;;
-	    ( 'F' ) add_to_var "CMDLIST_PATH" "${OPTARG}" ':' ;;
-	    ( 'L' ) add_to_var "HSTLIST_PATH" "${OPTARG}" ':' ;;
-	    ( 'e' ) add_to_list "CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
-	    ( 'f' ) add_to_list "CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
-	    ( 'h' ) add_to_list "HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
-	    ( 'l' ) add_to_list "HSTLIST" "L${OPTIND}" "${OPTARG}" ;;
-	    ( 'm' ) add_to_var "HOSTLIST_MASK" "${OPTARG}" '\\n' ;;
+	    ( 'C' ) add_to_var "SYSEXEC_CPATH" "${OPTARG}" ':' ;;
+	    ( 'F' ) add_to_var "SYSEXEC_FPATH" "${OPTARG}" ':' ;;
+	    ( 'L' ) add_to_var "SYSEXEC_LPATH" "${OPTARG}" ':' ;;
+	    ( 'e' ) add_to_list "SYSEXEC_CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
+	    ( 'f' ) add_to_list "SYSEXEC_CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
+	    ( 'h' ) add_to_list "SYSEXEC_HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
+	    ( 'l' ) add_to_list "SYSEXEC_HSTLIST" "L${OPTIND}" "${OPTARG}" ;;
+	    ( 'm' ) add_to_var "SYSEXEC_MASK" "${OPTARG}" '\\n' ;;
 	    ( 'q' ) SYSEXEC_PRINT="true" ;;
-	    ( 'r' ) add_to_var "HOSTLIST_REGEX" "${OPTARG}" '\\n' ;;
+	    ( 'r' ) add_to_var "SYSEXEC_REGEX" "${OPTARG}" '\\n' ;;
 	    ( 'u' ) SYSEXEC_USER="${OPTARG}" ;;
 	    ( 'v' ) SYSEXEC_VERBOSE="true" ;;
 	    ( ':' ) err "missing argument for option -- '${OPTARG}'" || usage ;;
@@ -87,91 +87,42 @@ get_options () {
     done
     shift $(( OPTIND - 1 ))
     if test -n "$*" ; then
-	test -z "${CMDLIST}" ||
+	test -z "${SYSEXEC_CMDLIST}" ||
 	    err "'-e' and '-f' options are mutually exclusive with 'command'" ||
 	    return 1
-	add_to_list "CMDLIST" "E${OPTIND}" "$*"
+	add_to_list "SYSEXEC_CMDLIST" "E${OPTIND}" "$*"
     fi
 }
 
 ####
 
-#% include "mklist.sht"
-#% include "run_ssh.sht"
-
-####
-
-# Main sysexec function
-sysexec () {
-    local host=""
-
-    # Create host and command lists
-    mklist "hst" "${W_HSTLIST}" && mklist "cmd" "${W_CMDLIST}" || return 1
-    test -s "${W_HSTLIST}" || err "resulting host list is empty" || return 1
-    test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
-
-    # Just print the resulting hosts list
-    if test -n "${SYSEXEC_PRINT}" ; then
-	cmd cat "${W_HSTLIST}"
-	return 0
-    fi
-
-    # Run 'before' script
-    if test -n "${SYSEXEC_BEFORE_CMD}" ; then
-	"${SH}" -c "${SYSEXEC_BEFORE_CMD}" ||
-	    err "'before' command returned nonzero status" || return 1
-    fi
-
-    # Execute commands at remote hosts
-    while read -r host ; do
-	test -n "${SYSEXEC_VERBOSE}" && printf "%s\n" "${host}"
-	# Set API variables and call run_ssh
-	RUN_SSH_HOST="${host}"
-	RUN_SSH_USER="${SYSEXEC_USER}"
-	RUN_SSH_INFILE="${W_CMDLIST}"
-	run_ssh
-    done < "${W_HSTLIST}"
-
-    # Run 'after' script
-    if test -n "${SYSEXEC_AFTER_CMD}" ; then
-	"${SH}" -c "${SYSEXEC_AFTER_CMD}" ||
-	    err "'after' command returned nonzero status" || return 1
-    fi
-}
+#% include "sysexec.sht"
 
 ####
 
 # Initialization subroutine
 init () {
-    local shell=""
-
     # Some common variables
     : "${RANDOM:=$(cmd date +%s)}"	# Workaround for dash
     : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
-
-    # Determine shell and ssh executables
-    SH=""
-    for shell in "/bin/sh" "/usr/bin/sh" "$(command -pv sh)" ; do
-	test -x "${shell}" && SH="${shell}" && break
-    done
     SSH="$(command -v ssh)"
 
     # Working directory and files
     WORKDIR="${XDG_STATE_HOME}/sysexec"
-    W_CMDLIST="${WORKDIR}/cmdlist.${RANDOM}.$$"
-    W_HSTLIST="${WORKDIR}/hstlist.${RANDOM}.$$"
-
-    # Variables for 'mklist'
-    CMDLIST=""
-    HSTLIST=""
-    CMDLIST_PATH=""
-    HSTLIST_PATH=""
-    COMMON_PATH=""
+    SYSEXEC_CMDFILE="${WORKDIR}/cmdlist.${RANDOM}.$$"
+    SYSEXEC_HSTFILE="${WORKDIR}/hstlist.${RANDOM}.$$"
+    SYSEXEC_VPREFIX="SYSEXEC_LIST"
 
     # Variables for 'hostlist'
-    HOSTLIST_MASK=""
-    HOSTLIST_REGEX=""
-    HOSTLIST_OFLAG=""
+    SYSEXEC_MASK=""
+    SYSEXEC_REGEX=""
+
+    # Variables for 'mklist'
+    SYSEXEC_CMDLIST=""
+    SYSEXEC_HSTLIST=""
+    SYSEXEC_FPATH=""
+    SYSEXEC_LPATH=""
+    SYSEXEC_CPATH=""
 
     # Defaults
     SYSEXEC_AFTER_CMD=""
@@ -186,21 +137,14 @@ startup () {
     # Check 'ssh' executable
     test -n "${SSH}" || err "'ssh' executable not found" || return 1
 
-    # Check 'sh' executable
-    if test -n "${SYSEXEC_BEFORE_CMD}" ||
-	test -n "${SYSEXEC_AFTER_CMD}"
-    then
-	test -n "${SH}" || err "'sh' executable not found" || return 1
-    fi
-
     # Check user
     test -n "${SYSEXEC_USER}" || err "empty user name is set" || return 1
 
     # Check host list
-    test -n "${HSTLIST}" || err "neither 'host' nor 'listfile' are set" || return 1
+    test -n "${SYSEXEC_HSTLIST}" || err "neither 'host' nor 'listfile' are set" || return 1
 
     # Check command list
-    test -n "${CMDLIST}" || err "neither 'command' nor 'cmdfile' are set" || return 1
+    test -n "${SYSEXEC_CMDLIST}" || err "neither 'command' nor 'cmdfile' are set" || return 1
 
     # Try to create working directory
     test -d "${WORKDIR}" || ( umask 0077 ; cmd mkdir -p "${WORKDIR}" ) ||
@@ -209,7 +153,7 @@ startup () {
 
 # Clean up the staff
 cleanup () {
-    cmd rm -f "${W_CMDLIST}" "${W_HSTLIST}"
+    cmd rm -f "${SYSEXEC_CMDFILE}" "${SYSEXEC_HSTFILE}"
 }
 
 # Clean up the staff and exit with error

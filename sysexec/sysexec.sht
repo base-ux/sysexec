@@ -1,0 +1,119 @@
+#% ifndef _SYSEXEC_SHT
+#% define _SYSEXEC_SHT	1
+
+#% include "local.sht"
+#% include "cmd.sht"
+#% include "err.sht"
+
+####
+
+#% include "mklist.sht"
+#% include "run_ssh.sht"
+
+####
+
+# Some checks
+sysexec_check () {
+    local shell=""
+
+    # Check required files is set
+    test -n "${W_HSTLIST}" || err "host list file is not set" || return 1
+    test -n "${W_CMDLIST}" || err "command list file is not set" || return 1
+
+    if test -n "${BEFORE_CMD}" || test -n "${AFTER_CMD}" ; then
+	# Determine shell
+	SH=""
+	for shell in "/bin/sh" "/usr/bin/sh" "$(command -pv sh)" ; do
+	    test -x "${shell}" && SH="${shell}" && break
+	done
+	test -n "${SH}" || err "'sh' executable not found" || return 1
+    fi
+}
+
+# Create host and command lists
+sysexec_mklist () {
+    # Create host list
+    MKLIST_TYPE="hst" \
+    MKLIST_OUTFILE="${W_HSTLIST}" \
+    mklist || return 1
+
+    # Create command list
+    MKLIST_TYPE="cmd" \
+    MKLIST_OUTFILE="${W_CMDLIST}" \
+    mklist || return 1
+
+    # Check resulting files
+    test -s "${W_HSTLIST}" || err "resulting host list is empty" || return 1
+    test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
+}
+
+# Run local command
+sysexec_runcmd () {
+    if test -n "$1" ; then "${SH}" -c "$1" ; fi
+}
+
+# Run 'before' script
+sysexec_before () {
+    sysexec_runcmd "${BEFORE_CMD}" || err "'before' command returned nonzero status"
+}
+
+# Run 'after' script
+sysexec_after () {
+    sysexec_runcmd "${AFTER_CMD}" || err "'after' command returned nonzero status"
+}
+
+# Execute commands at remote hosts
+sysexec_process () {
+    local host=""
+
+    while read -r host ; do
+	test -n "${VERBOSE}" && printf "%s\n" "${host}"
+	# Set API variables and call run_ssh
+	RUN_SSH_HOST="${host}"
+	RUN_SSH_USER="${DEF_USER}"
+	RUN_SSH_INFILE="${W_CMDLIST}"
+	run_ssh
+    done < "${W_HSTLIST}"
+}
+
+# Main sysexec function
+sysexec_main () {
+    # Run some checks
+    sysexec_check || return 1
+
+    # Create host and command lists
+    sysexec_mklist || return 1
+
+    # Just print the resulting hosts list
+    if test -n "${PRINT}" ; then
+	cmd cat "${W_HSTLIST}"
+	return 0
+    fi
+
+    sysexec_before && sysexec_process && sysexec_after
+}
+
+# API function for sysexec
+sysexec () {
+    # Run the main function in a subshell to be able to override
+    # global variables with the same names and redirect input/output
+    (
+	W_HSTLIST="${SYSEXEC_HSTFILE}"
+	W_CMDLIST="${SYSEXEC_CMDFILE}"
+	HOSTLIST_MASK="${SYSEXEC_MASK}"
+	HOSTLIST_REGEX="${SYSEXEC_REGEX}"
+	MKLIST_CMDLIST="${SYSEXEC_CMDLIST}"
+	MKLIST_HSTLIST="${SYSEXEC_HSTLIST}"
+	MKLIST_FPATH="${SYSEXEC_FPATH}"
+	MKLIST_LPATH="${SYSEXEC_LPATH}"
+	MKLIST_CPATH="${SYSEXEC_CPATH}"
+	MKLIST_VPREFIX="${SYSEXEC_VPREFIX}"
+	DEF_USER="${SYSEXEC_USER}"
+	AFTER_CMD="${SYSEXEC_AFTER_CMD}"
+	BEFORE_CMD="${SYSEXEC_BEFORE_CMD}"
+	PRINT="${SYSEXEC_PRINT}"
+	VERBOSE="${SYSEXEC_VERBOSE}"
+	sysexec_main
+    )
+}
+#% endif
