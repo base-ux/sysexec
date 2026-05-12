@@ -57,9 +57,14 @@ run_ssh_main () {
     case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
     if test -n "${OUTFILE}" ; then
 	# If output file is set then try to create it
-	( : > "${OUTFILE}" ) 2>/dev/null ||
+	( : >> "${OUTFILE}" ) 2>/dev/null ||
 	    err "can't create output file '${OUTFILE}'" || return 1
-	exec 1> "${OUTFILE}"	# Open output file
+	# Open output file
+	if test -n "${APPEND}" ; then
+	    exec 1>> "${OUTFILE}"
+	else
+	    exec 1> "${OUTFILE}"
+	fi
     fi
     exec 0< "${INFILE}"		# Open input file
 
@@ -82,6 +87,7 @@ run_ssh () {
 	SSH_USER="${RUN_SSH_USER}"
 	INFILE="${RUN_SSH_INFILE}"
 	OUTFILE="${RUN_SSH_OUTFILE}"
+	APPEND="${RUN_SSH_APPEND}"
 	run_ssh_main
     )
 }

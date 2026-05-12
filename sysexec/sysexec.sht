@@ -20,7 +20,9 @@ sysexec_check () {
     test -n "${W_HSTLIST}" || err "host list file is not set" || return 1
     test -n "${W_CMDLIST}" || err "command list file is not set" || return 1
 
-    if test -n "${BEFORE_CMD}" || test -n "${AFTER_CMD}" ; then
+    if test -n "${BEFORE_CMD}" || test -n "${AFTER_CMD}" ||
+	test -n "${PREEXEC}" || test -n "${POSTEXEC}"
+    then
 	# Determine shell
 	SH=""
 	for shell in "/bin/sh" "/usr/bin/sh" "$(command -pv sh)" ; do
@@ -49,30 +51,120 @@ sysexec_mklist () {
 
 # Run local command
 sysexec_runcmd () {
-    if test -n "$1" ; then "${SH}" -c "$1" ; fi
+    if test -n "$2" ; then
+	"${SH}" -c "$2" || err "'$1' command returned nonzero status"
+    fi
 }
 
-# Run 'before' script
-sysexec_before () {
-    sysexec_runcmd "${BEFORE_CMD}" || err "'before' command returned nonzero status"
+# Process 'user@host:port' entries
+sysexec_set_host () {
+    local host="$1"
+    local user=""
+    local port=""
+
+    case "${host}" in
+	( *'@'* ) user="${host%%@*}" ; host="${host#*@}" ;;
+    esac
+    case "${host}" in
+	( *':'* ) port="${host##*:}" ; host="${host%:*}" ;;
+    esac
+    case "${host}" in
+	( *[@:]* ) err "wrong formatted host entry '$1'" || return 1 ;;
+    esac
+    R_HOST="${host}"
+    R_USER="${user:-"${DEF_USER}"}"
+    R_PORT="${port:-22}"
 }
 
-# Run 'after' script
-sysexec_after () {
-    sysexec_runcmd "${AFTER_CMD}" || err "'after' command returned nonzero status"
+# Process outfile patterns
+sysexec_set_outfile () {
+    local out="${OUTFILE}"
+
+    while : ; do
+	case "${out}" in
+	    ( *'%h'* ) out="${out%%\%h*}${R_HOST}${out#*\%h}" ;;
+	    ( *'%u'* ) out="${out%%\%u*}${R_USER}${out#*\%u}" ;;
+	    ( * ) break ;;
+	esac
+    done
+    RUN_SSH_OUTFILE="${out}"
+}
+
+# Process pre- and post-exec patterns
+sysexec_set_prepost () {
+    local type="$1"
+    local res="$2"
+
+    while : ; do
+	case "${res}" in
+	    ( *'%h'* ) res="${res%%\%h*}${R_HOST}${res#*\%h}" ;;
+	    ( *'%u'* ) res="${res%%\%u*}${R_USER}${res#*\%u}" ;;
+	    ( *'%o'* ) res="${res%%\%o*}${RUN_SSH_OUTFILE}${res#*\%o}" ;;
+	    ( * ) break ;;
+	esac
+    done
+    case "${type}" in
+	( "pre" ) R_PREEXEC="${res}" ;;
+	( "post" ) R_POSTEXEC="${res}" ;;
+    esac
+}
+
+# Process host
+sysexec_process_host () {
+    case "$1" in
+	( *[@:]* ) sysexec_set_host "$1" || return 1 ;;
+	( * ) R_HOST="$1" ; R_USER="${DEF_USER}" ; R_PORT="22" ;;
+    esac
+    case "${OUTFILE}" in
+	( *'%h'* | *'%u'* ) sysexec_set_outfile ;;
+    esac
+    case "${PREEXEC}" in
+	( *'%h'* | *'%u'* | *'%o'* ) sysexec_set_prepost "pre" "${PREEXEC}" ;;
+    esac
+    case "${POSTEXEC}" in
+	( *'%h'* | *'%u'* | *'%o'* ) sysexec_set_prepost "post" "${POSTEXEC}" ;;
+    esac
+
+    sysexec_runcmd "pre-exec" "${R_PREEXEC}" || return 1
+
+    test -n "${VERBOSE}" && printf "%s\n" "${R_HOST}"
+    # Set API variables and call run_ssh
+    RUN_SSH_HOST="${R_HOST}"
+    RUN_SSH_PORT="${R_PORT}"
+    RUN_SSH_USER="${R_USER}"
+    run_ssh	# Ignore error status
+
+    sysexec_runcmd "post-exec" "${R_POSTEXEC}" || return 1
 }
 
 # Execute commands at remote hosts
 sysexec_process () {
     local host=""
 
-    while read -r host ; do
-	test -n "${VERBOSE}" && printf "%s\n" "${host}"
-	# Set API variables and call run_ssh
-	RUN_SSH_HOST="${host}"
-	RUN_SSH_USER="${DEF_USER}"
-	RUN_SSH_INFILE="${W_CMDLIST}"
-	run_ssh
+    # Set invariants before cycle
+    RUN_SSH_INFILE="${W_CMDLIST}"
+    case "${OUTFILE}" in
+	( *'%h'* | *'%u'* ) RUN_SSH_APPEND="" ;;	# There are patterns in value
+	( * )
+	    # Try to clear output file
+	    ( : > "${OUTFILE}" ) 2>/dev/null ||
+		err "can't create output file '${OUTFILE}'" || return 1
+	    RUN_SSH_OUTFILE="${OUTFILE}"
+	    RUN_SSH_APPEND="true"
+	    ;;
+    esac
+    case "${PREEXEC}" in
+	( *'%h'* | *'%u'* | *'%o'* ) ;;	# There are patterns in value
+	( * ) R_PREEXEC="${PREEXEC}" ;;
+    esac
+    case "${POSTEXEC}" in
+	( *'%h'* | *'%u'* | *'%o'* ) ;;	# There are patterns in value
+	( * ) R_POSTEXEC="${POSTEXEC}" ;;
+    esac
+
+    # Cycle through hosts
+    while read host ; do
+	sysexec_process_host "${host}"
     done < "${W_HSTLIST}"
 }
 
@@ -90,7 +182,9 @@ sysexec_main () {
 	return 0
     fi
 
-    sysexec_before && sysexec_process && sysexec_after
+    sysexec_runcmd "before" "${BEFORE_CMD}" &&
+	sysexec_process &&
+	sysexec_runcmd "after" "${AFTER_CMD}"
 }
 
 # API function for sysexec
@@ -108,9 +202,12 @@ sysexec () {
 	MKLIST_LPATH="${SYSEXEC_LPATH}"
 	MKLIST_CPATH="${SYSEXEC_CPATH}"
 	MKLIST_VPREFIX="${SYSEXEC_VPREFIX}"
-	DEF_USER="${SYSEXEC_USER}"
 	AFTER_CMD="${SYSEXEC_AFTER_CMD}"
 	BEFORE_CMD="${SYSEXEC_BEFORE_CMD}"
+	DEF_USER="${SYSEXEC_USER}"
+	OUTFILE="${SYSEXEC_OUTFILE}"
+	PREEXEC="${SYSEXEC_PREEXEC}"
+	POSTEXEC="${SYSEXEC_POSTEXEC}"
 	PRINT="${SYSEXEC_PRINT}"
 	VERBOSE="${SYSEXEC_VERBOSE}"
 	sysexec_main

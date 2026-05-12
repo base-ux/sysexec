@@ -39,8 +39,11 @@ usage_help () {
     -C path	common search path for 'listfile' and 'cmdfile' (colon separated)
     -F path	search path for 'cmdfile' (colon separated)
     -L path	search path for 'listfile' (colon separated)
+    -o outfile	output file or 'pattern' (%h is host, %u is user)
     -B before	command to execute before processing
     -A after	command to execute after processing
+    -p preexec	pre-exec command (%h is host, %u is user, %o is outfile)
+    -P postexec	post-exec command (%h is host, %u is user, %o is outfile)
     -m mask	filter hosts from host list by mask
     -r regex	filter hosts from host list by regular expression
     -q		print the resulting list of hosts (no commands execution)
@@ -64,18 +67,21 @@ get_options () {
     local opt=""
 
     case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
-    while getopts ":A:B:C:F:L:e:f:h:l:m:qr:u:v" opt ; do
+    while getopts ":A:B:C:F:L:P:e:f:h:l:m:o:p:qr:u:v" opt ; do
 	case "${opt}" in
 	    ( 'A' ) SYSEXEC_AFTER_CMD="${OPTARG}" ;;
 	    ( 'B' ) SYSEXEC_BEFORE_CMD="${OPTARG}" ;;
 	    ( 'C' ) add_to_var "SYSEXEC_CPATH" "${OPTARG}" ':' ;;
 	    ( 'F' ) add_to_var "SYSEXEC_FPATH" "${OPTARG}" ':' ;;
 	    ( 'L' ) add_to_var "SYSEXEC_LPATH" "${OPTARG}" ':' ;;
+	    ( 'P' ) SYSEXEC_POSTEXEC="${OPTARG}" ;;
 	    ( 'e' ) add_to_list "SYSEXEC_CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
 	    ( 'f' ) add_to_list "SYSEXEC_CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
 	    ( 'h' ) add_to_list "SYSEXEC_HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
 	    ( 'l' ) add_to_list "SYSEXEC_HSTLIST" "L${OPTIND}" "${OPTARG}" ;;
 	    ( 'm' ) add_to_var "SYSEXEC_MASK" "${OPTARG}" '\\n' ;;
+	    ( 'o' ) SYSEXEC_OUTFILE="${OPTARG}" ;;
+	    ( 'p' ) SYSEXEC_PREEXEC="${OPTARG}" ;;
 	    ( 'q' ) SYSEXEC_PRINT="true" ;;
 	    ( 'r' ) add_to_var "SYSEXEC_REGEX" "${OPTARG}" '\\n' ;;
 	    ( 'u' ) SYSEXEC_USER="${OPTARG}" ;;
@@ -127,6 +133,9 @@ init () {
     # Defaults
     SYSEXEC_AFTER_CMD=""
     SYSEXEC_BEFORE_CMD=""
+    SYSEXEC_OUTFILE=""
+    SYSEXEC_POSTEXEC=""
+    SYSEXEC_PREEXEC=""
     SYSEXEC_PRINT=""
     SYSEXEC_USER="${USER:-$(cmd id -un)}"
     SYSEXEC_VERBOSE=""
