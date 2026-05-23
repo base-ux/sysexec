@@ -147,8 +147,10 @@ sysexec_process () {
 	( *'%h'* | *'%u'* ) RUN_SSH_APPEND="" ;;	# There are patterns in value
 	( * )
 	    # Try to clear output file
-	    ( : > "${OUTFILE}" ) 2>/dev/null ||
-		err "can't create output file '${OUTFILE}'" || return 1
+	    if test -n "${OUTFILE}" ; then
+		( : > "${OUTFILE}" ) 2>/dev/null ||
+		    err "can't create output file '${OUTFILE}'" || return 1
+	    fi
 	    RUN_SSH_OUTFILE="${OUTFILE}"
 	    RUN_SSH_APPEND="true"
 	    ;;
