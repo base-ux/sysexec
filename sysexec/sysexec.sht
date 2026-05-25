@@ -128,32 +128,33 @@ sysexec_process_host () {
     sysexec_runcmd "pre-exec" "${R_PREEXEC}" || return 1
 
     test -n "${VERBOSE}" && printf "%s\n" "${R_HOST}"
+
     # Set API variables and call run_ssh
     RUN_SSH_HOST="${R_HOST}"
     RUN_SSH_PORT="${R_PORT}"
     RUN_SSH_USER="${R_USER}"
-    run_ssh	# Ignore error status
+
+    # Error status for run_ssh will be ignored
+    if test -n "${G_OUTFILE}" ; then
+	# Redirect output from run_ssh to global output file
+	run_ssh >&3
+    else
+	# Otherwise the output will be redirected to stdout or
+	# individual output file by run_ssh if OUTPUT is pattern
+	run_ssh
+    fi
 
     sysexec_runcmd "post-exec" "${R_POSTEXEC}" || return 1
 }
 
-# Execute commands at remote hosts
-sysexec_process () {
-    local host=""
-
+# Some preprocess actions
+sysexec_preprocess () {
     # Set invariants before cycle
     RUN_SSH_INFILE="${W_CMDLIST}"
+    RUN_SSH_OUTFILE=""	# Will be set later
     case "${OUTFILE}" in
-	( *'%h'* | *'%u'* ) RUN_SSH_APPEND="" ;;	# There are patterns in value
-	( * )
-	    # Try to clear output file
-	    if test -n "${OUTFILE}" ; then
-		( : > "${OUTFILE}" ) 2>/dev/null ||
-		    err "can't create output file '${OUTFILE}'" || return 1
-	    fi
-	    RUN_SSH_OUTFILE="${OUTFILE}"
-	    RUN_SSH_APPEND="true"
-	    ;;
+	( *'%h'* | *'%u'* ) ;;		# There are patterns in value
+	( * ) G_OUTFILE="${OUTFILE}" ;;
     esac
     case "${PREEXEC}" in
 	( *'%h'* | *'%u'* | *'%o'* ) ;;	# There are patterns in value
@@ -163,6 +164,28 @@ sysexec_process () {
 	( *'%h'* | *'%u'* | *'%o'* ) ;;	# There are patterns in value
 	( * ) R_POSTEXEC="${POSTEXEC}" ;;
     esac
+
+    # Open global output file
+    case "${G_OUTFILE}" in ( '-' ) G_OUTFILE="" ;; esac
+    if test -n "${G_OUTFILE}" ; then
+	# Try to clear output file
+	( : > "${G_OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${G_OUTFILE}'" || return 1
+	exec 3> "${G_OUTFILE}"	# Open output file as fd 3
+    fi
+}
+
+# Some postprocess actions
+sysexec_postprocess () {
+    # Close global output file
+    if test -n "${G_OUTFILE}" ; then
+	exec 3>&-	# Close output file
+    fi
+}
+
+# Execute commands at remote hosts
+sysexec_process () {
+    local host=""
 
     # Cycle through hosts
     while read host ; do
@@ -185,7 +208,9 @@ sysexec_main () {
     fi
 
     sysexec_runcmd "before" "${BEFORE_CMD}" &&
+	sysexec_preprocess &&
 	sysexec_process &&
+	sysexec_postprocess &&
 	sysexec_runcmd "after" "${AFTER_CMD}"
 }
 
@@ -194,6 +219,7 @@ sysexec () {
     # Run the main function in a subshell to be able to override
     # global variables with the same names and redirect input/output
     (
+	# Translate API variables
 	W_HSTLIST="${SYSEXEC_HSTFILE}"
 	W_CMDLIST="${SYSEXEC_CMDFILE}"
 	HOSTLIST_MASK="${SYSEXEC_MASK}"
@@ -212,6 +238,13 @@ sysexec () {
 	POSTEXEC="${SYSEXEC_POSTEXEC}"
 	PRINT="${SYSEXEC_PRINT}"
 	VERBOSE="${SYSEXEC_VERBOSE}"
+	# Reset used variables
+	R_HOST=""
+	R_PORT=""
+	R_USER=""
+	R_PREEXEC=""
+	R_POSTEXEC=""
+	G_OUTFILE=""
 	sysexec_main
     )
 }
