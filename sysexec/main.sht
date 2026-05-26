@@ -40,6 +40,7 @@ usage_help () {
     -F path	search path for 'cmdfile' (colon separated)
     -L path	search path for 'listfile' (colon separated)
     -o outfile	output file or 'pattern' (%h is host, %u is user)
+    -O sshopts	options to 'ssh' command
     -B before	command to execute before processing
     -A after	command to execute after processing
     -p preexec	pre-exec command (%h is host, %u is user, %o is outfile)
@@ -67,13 +68,14 @@ get_options () {
     local opt=""
 
     case "$1" in ( '-?' | '-help' | '--help' ) usage_help ;; esac
-    while getopts ":A:B:C:F:L:P:e:f:h:l:m:o:p:qr:u:v" opt ; do
+    while getopts ":A:B:C:F:L:O:P:e:f:h:l:m:o:p:qr:u:v" opt ; do
 	case "${opt}" in
 	    ( 'A' ) SYSEXEC_AFTER_CMD="${OPTARG}" ;;
 	    ( 'B' ) SYSEXEC_BEFORE_CMD="${OPTARG}" ;;
 	    ( 'C' ) add_to_var "SYSEXEC_CPATH" "${OPTARG}" ':' ;;
 	    ( 'F' ) add_to_var "SYSEXEC_FPATH" "${OPTARG}" ':' ;;
 	    ( 'L' ) add_to_var "SYSEXEC_LPATH" "${OPTARG}" ':' ;;
+	    ( 'O' ) add_to_var "SYSEXEC_SSHOPTS" "${OPTARG}" ;;
 	    ( 'P' ) SYSEXEC_POSTEXEC="${OPTARG}" ;;
 	    ( 'e' ) add_to_list "SYSEXEC_CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
 	    ( 'f' ) add_to_list "SYSEXEC_CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
@@ -111,7 +113,6 @@ init () {
     # Some common variables
     : "${RANDOM:=$(cmd date +%s)}"	# Workaround for dash
     : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
-    SSH="$(command -v ssh)"
 
     # Working directory and files
     WORKDIR="${XDG_STATE_HOME}/sysexec"
@@ -130,6 +131,11 @@ init () {
     SYSEXEC_LPATH=""
     SYSEXEC_CPATH=""
 
+    # Variables for 'run_ssh'
+    SYSEXEC_SSH="$(command -pv ssh)"
+    SYSEXEC_CTLPATH="${WORKDIR}"
+    SYSEXEC_SSHOPTS=""
+
     # Defaults
     SYSEXEC_AFTER_CMD=""
     SYSEXEC_BEFORE_CMD=""
@@ -143,9 +149,6 @@ init () {
 
 # Startup subroutine
 startup () {
-    # Check 'ssh' executable
-    test -n "${SSH}" || err "'ssh' executable not found" || return 1
-
     # Check user
     test -n "${SYSEXEC_USER}" || err "empty user name is set" || return 1
 
