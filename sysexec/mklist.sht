@@ -8,7 +8,11 @@
 #% include "add_to_var.sht"
 #% include "squote.sht"
 
+####
+
 #% include "hostlist.sht"
+
+####
 
 # Search file via XPATH directories
 search_xpath () {
@@ -48,74 +52,54 @@ search_file () {
     printf "%s" "${file}"
 }
 
-# Main mkcmdlist function
-mkcmdlist () {
+# Create list
+mklist_process () {
     local e=""
     local v=""
     local file=""
-
-    eval "set -- ${CMDLIST}"
-    for e in "$@" ; do
-	case "${e}" in
-	    ( [!EF]* | [EF] | [EF]*[!0-9]* ) continue ;;	# Skip garbage
-	esac
-	eval "v=\"\${${VPREFIX}_${e}}\""
-	test -n "${v}" || continue				# Skip empty values
-	case "${e}" in
-	    ( 'E'* ) printf "%s\n" "${v}" ;;
-	    ( 'F'* )
-		case "${v}" in ( '-' ) continue ;; esac		# Skip stdin
-		file="$(search_file "${v}")" || err "can't find file: ${v}" || return 1
-		check_file "${file}" && cmd cat "${file}" ||
-		    err "can't open file: ${file}" || return 1
-		;;
-	esac
-    done
-}
-
-# Main mkhstlist function
-mkhstlist () {
-    local e=""
-    local v=""
     local list=""
-    local file=""
 
-    eval "set -- ${HSTLIST}"
+    eval "set -- ${ELEMENTS}"
     for e in "$@" ; do
-	case "${e}" in
-	    ( [!HL]* | [HL] | [HL]*[!0-9]* ) continue ;;	# Skip garbage
+	case "${LISTTYPE}${e}" in
+	    ( 'cmd'[EF]* | 'hst'[HL]* )
+		eval "v=\"\${${ARRAY}_${e}}\""
+		test -n "${v}" || continue	# Skip empty values
+		;;
+	    ( * ) continue ;;			# Skip other elements
 	esac
-	eval "v=\"\${${VPREFIX}_${e}}\""
-	test -n "${v}" || continue				# Skip empty values
-	case "${e}" in
-	    ( 'H'* ) printf "%s\n" "${v}" ;;
-	    ( 'L'* )
+	case "${LISTTYPE}${e}" in
+	    ( 'cmdE'* | 'hstH'* ) printf "%s\n" "${v}" ;;
+	    ( 'cmdF'* | 'hstL'* )
 		case "${v}" in ( '-' ) continue ;; esac		# Skip stdin
 		file="$(search_file "${v}")" || err "can't find file: ${v}" || return 1
 		check_file "${file}" || err "can't open file: ${file}" || return 1
-		add_to_var "list" "$(squote "${file}")"
+		case "${LISTTYPE}" in
+		    ( 'cmd' ) cmd cat "${file}" ;;
+		    ( 'hst' ) add_to_var "list" "$(squote "${file}")" ;;
+		esac
 		;;
 	esac
     done
     if test -n "${list}" ; then
-	# Reset 'hostlist' mode to 'host'
-	# Other 'hostlist' variables is set by main 'sysexec' script
-	HOSTLIST_GRP=""
 	eval "set -- ${list}"
 	hostlist "$@"
     fi
 }
 
-# Create list
+# Main mklist function
 mklist_main () {
     local rc=0	# Return code
 
+    # Set XPATH variable
     case "${LISTTYPE}" in
-	( 'cmd' ) test -n "${CMDLIST}" || err "command list is not set" ;;
-	( 'hst' ) test -n "${HSTLIST}" || err "host list is not set" ;;
-	( * ) err "unknown list type '${LISTTYPE}'" ;;
-    esac || return 1
+	( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
+	( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
+	( * ) err "unknown list type '${LISTTYPE}'" || return 1 ;;
+    esac
+    test -n "${COMMON_PATH}" && add_to_var "XPATH" "${COMMON_PATH}" ':'
 
+    # Open file descriptors
     case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
     if test -n "${OUTFILE}" ; then
 	# If output file is set then try to create it
@@ -124,15 +108,8 @@ mklist_main () {
 	exec 1> "${OUTFILE}"	# Open output file
     fi
 
-    # Set XPATH variable
-    case "${LISTTYPE}" in
-	( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
-	( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
-    esac
-    test -n "${COMMON_PATH}" && add_to_var "XPATH" "${COMMON_PATH}" ':'
-
-    # Call main function
-    "mk${LISTTYPE}list" || rc=$?
+    # Create list
+    mklist_process || rc=$?
 
     # Close file descriptors
     test -n "${OUTFILE}" && exec 1>&-
@@ -148,12 +125,11 @@ mklist () {
 	# Translate API variables to internal names
 	LISTTYPE="${MKLIST_TYPE}"
 	OUTFILE="${MKLIST_OUTFILE}"
-	CMDLIST="${MKLIST_CMDLIST}"
-	HSTLIST="${MKLIST_HSTLIST}"
+	ARRAY="${MKLIST_ARRAY}"
+	ELEMENTS="${MKLIST_ELEMENTS}"
 	CMDLIST_PATH="${MKLIST_FPATH}"
 	HSTLIST_PATH="${MKLIST_LPATH}"
 	COMMON_PATH="${MKLIST_CPATH}"
-	VPREFIX="${MKLIST_VPREFIX}"
 	mklist_main
     )
 }

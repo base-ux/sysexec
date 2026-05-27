@@ -7,6 +7,7 @@ PROG="${0##*/}"
 #% include "cmd.sht"
 #% include "err.sht"
 #% include "add_to_var.sht"
+#% include "squote.sht"
 
 ####
 
@@ -59,7 +60,7 @@ EOF
 # $2 marker for list
 # $3 value
 add_to_list () {
-    eval "${SYSEXEC_VPREFIX}_$2=\"$3\""
+    eval "$1_$2=$(squote "$3")"
     add_to_var "$1" "$2"
 }
 
@@ -77,10 +78,10 @@ get_options () {
 	    ( 'L' ) add_to_var "SYSEXEC_LPATH" "${OPTARG}" ':' ;;
 	    ( 'O' ) add_to_var "SYSEXEC_SSHOPTS" "${OPTARG}" ;;
 	    ( 'P' ) SYSEXEC_POSTEXEC="${OPTARG}" ;;
-	    ( 'e' ) add_to_list "SYSEXEC_CMDLIST" "E${OPTIND}" "${OPTARG}" ;;
-	    ( 'f' ) add_to_list "SYSEXEC_CMDLIST" "F${OPTIND}" "${OPTARG}" ;;
-	    ( 'h' ) add_to_list "SYSEXEC_HSTLIST" "H${OPTIND}" "${OPTARG}" ;;
-	    ( 'l' ) add_to_list "SYSEXEC_HSTLIST" "L${OPTIND}" "${OPTARG}" ;;
+	    ( 'e' ) add_to_list "SYSEXEC_LIST" "E${OPTIND}" "${OPTARG}" ;;
+	    ( 'f' ) add_to_list "SYSEXEC_LIST" "F${OPTIND}" "${OPTARG}" ;;
+	    ( 'h' ) add_to_list "SYSEXEC_LIST" "H${OPTIND}" "${OPTARG}" ;;
+	    ( 'l' ) add_to_list "SYSEXEC_LIST" "L${OPTIND}" "${OPTARG}" ;;
 	    ( 'm' ) add_to_var "SYSEXEC_MASK" "${OPTARG}" '\\n' ;;
 	    ( 'o' ) SYSEXEC_OUTFILE="${OPTARG}" ;;
 	    ( 'p' ) SYSEXEC_PREEXEC="${OPTARG}" ;;
@@ -95,10 +96,13 @@ get_options () {
     done
     shift $(( OPTIND - 1 ))
     if test -n "$*" ; then
-	test -z "${SYSEXEC_CMDLIST}" ||
-	    err "'-e' and '-f' options are mutually exclusive with 'command'" ||
-	    return 1
-	add_to_list "SYSEXEC_CMDLIST" "E${OPTIND}" "$*"
+	case "${SYSEXEC_LIST}" in
+	    ( *[EF]* )
+		err "'-e' and '-f' options are mutually exclusive with 'command'" ||
+		return 1
+		;;
+	esac
+	add_to_list "SYSEXEC_LIST" "E${OPTIND}" "$*"
     fi
 }
 
@@ -118,15 +122,13 @@ init () {
     WORKDIR="${XDG_STATE_HOME}/sysexec"
     SYSEXEC_CMDFILE="${WORKDIR}/cmdlist.${RANDOM}.$$"
     SYSEXEC_HSTFILE="${WORKDIR}/hstlist.${RANDOM}.$$"
-    SYSEXEC_VPREFIX="SYSEXEC_LIST"
 
     # Variables for 'hostlist'
     SYSEXEC_MASK=""
     SYSEXEC_REGEX=""
 
     # Variables for 'mklist'
-    SYSEXEC_CMDLIST=""
-    SYSEXEC_HSTLIST=""
+    SYSEXEC_LIST=""
     SYSEXEC_FPATH=""
     SYSEXEC_LPATH=""
     SYSEXEC_CPATH=""
@@ -153,10 +155,16 @@ startup () {
     test -n "${SYSEXEC_USER}" || err "empty user name is set" || return 1
 
     # Check host list
-    test -n "${SYSEXEC_HSTLIST}" || err "neither 'host' nor 'listfile' are set" || return 1
+    case "${SYSEXEC_LIST}" in
+	( *[HL]* ) ;;
+	( * ) err "neither 'host' nor 'listfile' are set" || return 1 ;;
+    esac
 
     # Check command list
-    test -n "${SYSEXEC_CMDLIST}" || err "neither 'command' nor 'cmdfile' are set" || return 1
+    case "${SYSEXEC_LIST}" in
+	( *[EF]* ) ;;
+	( * ) err "neither 'command' nor 'cmdfile' are set" || return 1 ;;
+    esac
 
     # Try to create working directory
     test -d "${WORKDIR}" || ( umask 0077 ; cmd mkdir -p "${WORKDIR}" ) ||
