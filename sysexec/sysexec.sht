@@ -12,6 +12,34 @@
 
 ####
 
+# Initialization subroutine
+sysexec_init () {
+    # Reset used variables
+    R_HOST=""
+    R_PORT=""
+    R_USER=""
+    R_PREEXEC="${PREEXEC}"
+    R_POSTEXEC="${POSTEXEC}"
+    P_PREEXEC=""
+    P_POSTEXEC=""
+    P_OUTFILE=""
+
+    # Variables for 'run_ssh'
+    RUN_SSH_INFILE="${W_CMDLIST}"
+    RUN_SSH_OUTFILE=""		# Will be set later
+
+    case "${OUTFILE}" in
+	( *'%o'* ) err "unsupported pattern '%o' for outfile" || return 1 ;;
+	( *'%h'* | *'%u'* ) P_OUTFILE="true" ;;
+    esac
+    case "${PREEXEC}" in
+	( *'%h'* | *'%u'* | *'%o'* ) P_PREEXEC="true" ;;
+    esac
+    case "${POSTEXEC}" in
+	( *'%h'* | *'%u'* | *'%o'* ) P_POSTEXEC="true" ;;
+    esac
+}
+
 # Some checks
 sysexec_check () {
     local shell=""
@@ -21,7 +49,7 @@ sysexec_check () {
     test -n "${W_CMDLIST}" || err "command list file is not set" || return 1
 
     if test -n "${BEFORE_CMD}" || test -n "${AFTER_CMD}" ||
-	test -n "${PREEXEC}" || test -n "${POSTEXEC}"
+	    test -n "${PREEXEC}" || test -n "${POSTEXEC}"
     then
 	# Determine shell
 	SH=""
@@ -38,21 +66,41 @@ sysexec_mklist () {
     MKLIST_TYPE="hst" \
     MKLIST_OUTFILE="${W_HSTLIST}" \
     mklist || return 1
-
-    # Create command list
-    MKLIST_TYPE="cmd" \
-    MKLIST_OUTFILE="${W_CMDLIST}" \
-    mklist || return 1
-
-    # Check resulting files
     test -s "${W_HSTLIST}" || err "resulting host list is empty" || return 1
-    test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
+
+    if test -z "${PRINT}" ; then
+	# Create command list
+	MKLIST_TYPE="cmd" \
+	MKLIST_OUTFILE="${W_CMDLIST}" \
+	mklist || return 1
+	test -s "${W_CMDLIST}" || err "resulting command list is empty" || return 1
+    fi
 }
 
 # Run local command
 sysexec_runcmd () {
     if test -n "$2" ; then
 	"${SH}" -c "$2" || err "'$1' command returned nonzero status"
+    fi
+}
+
+# Open file descriptors
+sysexec_open_files () {
+    if test -z "${P_OUTFILE}" ; then
+	case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
+	if test -n "${OUTFILE}" ; then
+	    # Try to clear output file
+	    ( : > "${OUTFILE}" ) 2>/dev/null ||
+		err "can't create output file '${OUTFILE}'" || return 1
+	    exec 3> "${OUTFILE}"	# Open output file as fd 3
+	fi
+    fi
+}
+
+# Close file descriptors
+sysexec_close_files () {
+    if test -z "${P_OUTFILE}" && test -n "${OUTFILE}" ; then
+	exec 3>&-	# Close output file
     fi
 }
 
@@ -76,24 +124,9 @@ sysexec_set_host () {
     R_PORT="${port:-22}"
 }
 
-# Process outfile patterns
-sysexec_set_outfile () {
-    local out="${OUTFILE}"
-
-    while : ; do
-	case "${out}" in
-	    ( *'%h'* ) out="${out%%\%h*}${R_HOST}${out#*\%h}" ;;
-	    ( *'%u'* ) out="${out%%\%u*}${R_USER}${out#*\%u}" ;;
-	    ( * ) break ;;
-	esac
-    done
-    RUN_SSH_OUTFILE="${out}"
-}
-
-# Process pre- and post-exec patterns
-sysexec_set_prepost () {
-    local type="$1"
-    local res="$2"
+# Expand patterns
+sysexec_expand () {
+    local res="$1"
 
     while : ; do
 	case "${res}" in
@@ -103,10 +136,7 @@ sysexec_set_prepost () {
 	    ( * ) break ;;
 	esac
     done
-    case "${type}" in
-	( "pre" ) R_PREEXEC="${res}" ;;
-	( "post" ) R_POSTEXEC="${res}" ;;
-    esac
+    printf "%s" "${res}"
 }
 
 # Process host
@@ -115,15 +145,10 @@ sysexec_process_host () {
 	( *[@:]* ) sysexec_set_host "$1" || return 1 ;;
 	( * ) R_HOST="$1" ; R_USER="${DEF_USER}" ; R_PORT="22" ;;
     esac
-    case "${OUTFILE}" in
-	( *'%h'* | *'%u'* ) sysexec_set_outfile ;;
-    esac
-    case "${PREEXEC}" in
-	( *'%h'* | *'%u'* | *'%o'* ) sysexec_set_prepost "pre" "${PREEXEC}" ;;
-    esac
-    case "${POSTEXEC}" in
-	( *'%h'* | *'%u'* | *'%o'* ) sysexec_set_prepost "post" "${POSTEXEC}" ;;
-    esac
+
+    test -n "${P_OUTFILE}" && RUN_SSH_OUTFILE="$(sysexec_expand "${OUTFILE}")"
+    test -n "${P_PREEXEC}" && R_PREEXEC="$(sysexec_expand "${PREEXEC}")"
+    test -n "${P_POSTEXEC}" && R_POSTEXEC="$(sysexec_expand "${POSTEXEC}")"
 
     sysexec_runcmd "pre-exec" "${R_PREEXEC}" || return 1
 
@@ -135,7 +160,7 @@ sysexec_process_host () {
     RUN_SSH_USER="${R_USER}"
 
     # Error status for run_ssh will be ignored
-    if test -n "${G_OUTFILE}" ; then
+    if test -z "${P_OUTFILE}" && test -n "${OUTFILE}" ; then
 	# Redirect output from run_ssh to global output file
 	run_ssh >&3
     else
@@ -145,42 +170,6 @@ sysexec_process_host () {
     fi
 
     sysexec_runcmd "post-exec" "${R_POSTEXEC}" || return 1
-}
-
-# Some preprocess actions
-sysexec_preprocess () {
-    # Set invariants before cycle
-    RUN_SSH_INFILE="${W_CMDLIST}"
-    RUN_SSH_OUTFILE=""	# Will be set later
-    case "${OUTFILE}" in
-	( *'%h'* | *'%u'* ) ;;		# There are patterns in value
-	( * ) G_OUTFILE="${OUTFILE}" ;;
-    esac
-    case "${PREEXEC}" in
-	( *'%h'* | *'%u'* | *'%o'* ) ;;	# There are patterns in value
-	( * ) R_PREEXEC="${PREEXEC}" ;;
-    esac
-    case "${POSTEXEC}" in
-	( *'%h'* | *'%u'* | *'%o'* ) ;;	# There are patterns in value
-	( * ) R_POSTEXEC="${POSTEXEC}" ;;
-    esac
-
-    # Open global output file
-    case "${G_OUTFILE}" in ( '-' ) G_OUTFILE="" ;; esac
-    if test -n "${G_OUTFILE}" ; then
-	# Try to clear output file
-	( : > "${G_OUTFILE}" ) 2>/dev/null ||
-	    err "can't create output file '${G_OUTFILE}'" || return 1
-	exec 3> "${G_OUTFILE}"	# Open output file as fd 3
-    fi
-}
-
-# Some postprocess actions
-sysexec_postprocess () {
-    # Close global output file
-    if test -n "${G_OUTFILE}" ; then
-	exec 3>&-	# Close output file
-    fi
 }
 
 # Execute commands at remote hosts
@@ -195,23 +184,18 @@ sysexec_process () {
 
 # Main sysexec function
 sysexec_main () {
-    # Run some checks
-    sysexec_check || return 1
+    sysexec_init && sysexec_check && sysexec_mklist || return 1
 
-    # Create host and command lists
-    sysexec_mklist || return 1
-
-    # Just print the resulting hosts list
-    if test -n "${PRINT}" ; then
+    if test -z "${PRINT}" ; then
+	sysexec_runcmd "before" "${BEFORE_CMD}" &&
+	    sysexec_open_files &&
+	    sysexec_process &&
+	    sysexec_close_files &&
+	    sysexec_runcmd "after" "${AFTER_CMD}"
+    else
+	# Just print the resulting hosts list
 	cmd cat "${W_HSTLIST}"
-	return 0
     fi
-
-    sysexec_runcmd "before" "${BEFORE_CMD}" &&
-	sysexec_preprocess &&
-	sysexec_process &&
-	sysexec_postprocess &&
-	sysexec_runcmd "after" "${AFTER_CMD}"
 }
 
 # API function for sysexec
@@ -241,13 +225,6 @@ sysexec () {
 	POSTEXEC="${SYSEXEC_POSTEXEC}"
 	PRINT="${SYSEXEC_PRINT}"
 	VERBOSE="${SYSEXEC_VERBOSE}"
-	# Reset used variables
-	R_HOST=""
-	R_PORT=""
-	R_USER=""
-	R_PREEXEC=""
-	R_POSTEXEC=""
-	G_OUTFILE=""
 	sysexec_main
     )
 }

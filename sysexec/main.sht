@@ -152,18 +152,20 @@ init () {
 # Startup subroutine
 startup () {
     # Check user
-    test -n "${SYSEXEC_USER}" || err "empty user name is set" || return 1
+    test -n "${SYSEXEC_USER}" || err "empty user name is set" || usage || return 1
 
     # Check host list
     case "${SYSEXEC_LIST}" in
 	( *[HL]* ) ;;
-	( * ) err "neither 'host' nor 'listfile' are set" || return 1 ;;
+	( * ) err "neither 'host' nor 'listfile' are set" || usage || return 1 ;;
     esac
 
     # Check command list
     case "${SYSEXEC_LIST}" in
 	( *[EF]* ) ;;
-	( * ) err "neither 'command' nor 'cmdfile' are set" || return 1 ;;
+	( * )
+	    test -n "${SYSEXEC_PRINT}" ||
+		err "neither 'command' nor 'cmdfile' are set" || usage || return 1 ;;
     esac
 
     # Try to create working directory
