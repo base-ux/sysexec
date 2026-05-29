@@ -6,8 +6,7 @@ PROG="${0##*/}"
 #% include "local.sht"
 #% include "cmd.sht"
 #% include "err.sht"
-#% include "add_to_var.sht"
-#% include "squote.sht"
+#% include "add_var.sht"
 
 ####
 
@@ -59,9 +58,8 @@ EOF
 # $1 list variable name
 # $2 marker for list
 # $3 value
-add_to_list () {
-    eval "$1_$2=$(squote "$3")"
-    add_to_var "$1" "$2"
+add_list () {
+    add_var "$1_$2" "$3" && add_var "$1" "$2"
 }
 
 # Parse command line options
@@ -73,20 +71,20 @@ get_options () {
 	case "${opt}" in
 	    ( 'A' ) SYSEXEC_AFTER_CMD="${OPTARG}" ;;
 	    ( 'B' ) SYSEXEC_BEFORE_CMD="${OPTARG}" ;;
-	    ( 'C' ) add_to_var "SYSEXEC_CPATH" "${OPTARG}" ':' ;;
-	    ( 'F' ) add_to_var "SYSEXEC_FPATH" "${OPTARG}" ':' ;;
-	    ( 'L' ) add_to_var "SYSEXEC_LPATH" "${OPTARG}" ':' ;;
-	    ( 'O' ) add_to_var "SYSEXEC_SSHOPTS" "${OPTARG}" ;;
+	    ( 'C' ) add_var "SYSEXEC_CPATH" "${OPTARG}" ':' ;;
+	    ( 'F' ) add_var "SYSEXEC_FPATH" "${OPTARG}" ':' ;;
+	    ( 'L' ) add_var "SYSEXEC_LPATH" "${OPTARG}" ':' ;;
+	    ( 'O' ) add_var "SYSEXEC_SSHOPTS" "${OPTARG}" ;;
 	    ( 'P' ) SYSEXEC_POSTEXEC="${OPTARG}" ;;
-	    ( 'e' ) add_to_list "SYSEXEC_LIST" "E${OPTIND}" "${OPTARG}" ;;
-	    ( 'f' ) add_to_list "SYSEXEC_LIST" "F${OPTIND}" "${OPTARG}" ;;
-	    ( 'h' ) add_to_list "SYSEXEC_LIST" "H${OPTIND}" "${OPTARG}" ;;
-	    ( 'l' ) add_to_list "SYSEXEC_LIST" "L${OPTIND}" "${OPTARG}" ;;
-	    ( 'm' ) add_to_var "SYSEXEC_MASK" "${OPTARG}" '\\n' ;;
+	    ( 'e' ) add_list "SYSEXEC_LIST" "E${OPTIND}" "${OPTARG}" ;;
+	    ( 'f' ) add_list "SYSEXEC_LIST" "F${OPTIND}" "${OPTARG}" ;;
+	    ( 'h' ) add_list "SYSEXEC_LIST" "H${OPTIND}" "${OPTARG}" ;;
+	    ( 'l' ) add_list "SYSEXEC_LIST" "L${OPTIND}" "${OPTARG}" ;;
+	    ( 'm' ) add_var "SYSEXEC_MASK" "${OPTARG}" '\\n' ;;
 	    ( 'o' ) SYSEXEC_OUTFILE="${OPTARG}" ;;
 	    ( 'p' ) SYSEXEC_PREEXEC="${OPTARG}" ;;
 	    ( 'q' ) SYSEXEC_PRINT="true" ;;
-	    ( 'r' ) add_to_var "SYSEXEC_REGEX" "${OPTARG}" '\\n' ;;
+	    ( 'r' ) add_var "SYSEXEC_REGEX" "${OPTARG}" '\\n' ;;
 	    ( 'u' ) SYSEXEC_USER="${OPTARG}" ;;
 	    ( 'v' ) SYSEXEC_VERBOSE="true" ;;
 	    ( ':' ) err "missing argument for option -- '${OPTARG}'" || usage ;;
@@ -102,7 +100,7 @@ get_options () {
 		return 1
 		;;
 	esac
-	add_to_list "SYSEXEC_LIST" "E${OPTIND}" "$*"
+	add_list "SYSEXEC_LIST" "E${OPTIND}" "$*"
     fi
 }
 

@@ -5,7 +5,7 @@
 #% include "cmd.sht"
 #% include "err.sht"
 #% include "check_file.sht"
-#% include "add_to_var.sht"
+#% include "add_var.sht"
 #% include "squote.sht"
 
 ####
@@ -76,7 +76,7 @@ mklist_process () {
 		check_file "${file}" || err "can't open file: ${file}" || return 1
 		case "${LISTTYPE}" in
 		    ( 'cmd' ) cmd cat "${file}" ;;
-		    ( 'hst' ) add_to_var "list" "$(squote "${file}")" ;;
+		    ( 'hst' ) add_var "list" "$(squote "${file}")" ;;
 		esac
 		;;
 	esac
@@ -97,7 +97,7 @@ mklist_main () {
 	( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
 	( * ) err "unknown list type '${LISTTYPE}'" || return 1 ;;
     esac
-    test -n "${COMMON_PATH}" && add_to_var "XPATH" "${COMMON_PATH}" ':'
+    test -n "${COMMON_PATH}" && add_var "XPATH" "${COMMON_PATH}" ':'
 
     # Open file descriptors
     case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
