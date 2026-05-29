@@ -1,5 +1,8 @@
 #% ifndef _SQUOTE_SHT
 #% define _SQUOTE_SHT	1
+#%
+#% include "local.sht"
+#%
 
 # Return the string quoted with single quotes
 squote () {
