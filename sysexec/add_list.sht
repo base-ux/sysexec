@@ -1,0 +1,13 @@
+#% ifndef _ADD_LIST_SHT
+#% define _ADD_LIST_SHT	1
+#%
+#% include "add_var.sht"
+#%
+
+# $1 list variable name
+# $2 marker for list
+# $3 value
+add_list () {
+    add_var "$1_$2" "$3" && add_var "$1" "$2"
+}
+#% endif

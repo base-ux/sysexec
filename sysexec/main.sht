@@ -6,6 +6,7 @@ PROG="${0##*/}"
 #% include "local.sht"
 #% include "cmd.sht"
 #% include "err.sht"
+#% include "add_list.sht"
 #% include "add_var.sht"
 
 ####
@@ -54,13 +55,6 @@ EOF
 }
 
 ####
-
-# $1 list variable name
-# $2 marker for list
-# $3 value
-add_list () {
-    add_var "$1_$2" "$3" && add_var "$1" "$2"
-}
 
 # Parse command line options
 get_options () {
