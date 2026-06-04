@@ -14,6 +14,60 @@
 
 ####
 
+# Initialization subroutine
+mklist_init () {
+    # Translate API variables to internal names
+    LISTTYPE="${MKLIST_TYPE}"
+    OUTFILE="${MKLIST_OUTFILE}"
+    ARRAY="${MKLIST_ARRAY}"
+    ELEMENTS="${MKLIST_ELEMENTS}"
+    CMDLIST_PATH="${MKLIST_FPATH}"
+    HSTLIST_PATH="${MKLIST_LPATH}"
+    COMMON_PATH="${MKLIST_CPATH}"
+
+    # Variables for 'hostlist'
+    HOSTLIST_GRP=""	# Run 'hostlist' in 'host' mode
+    HOSTLIST_MASK="${MKLIST_MASK}"
+    HOSTLIST_REGEX="${MKLIST_REGEX}"
+
+    # Reset used variables
+    XPATH=""
+
+    # Consider '-' as stdin
+    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
+}
+
+# Check subroutine
+mklist_check () {
+    # Check list type and set XPATH variable accordingly
+    case "${LISTTYPE}" in
+	( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
+	( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
+	( * ) err "unknown list type '${LISTTYPE}'" ;;
+    esac &&
+    case "${COMMON_PATH}" in
+	( '' ) ;;
+	( * ) add_var "XPATH" "${COMMON_PATH}" ':' ;;
+    esac || return 1
+}
+
+# Open file descriptors
+mklist_open_files () {
+    if test -n "${OUTFILE}" ; then
+	# If output file is set then try to create it
+	( : > "${OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${OUTFILE}'" || return 1
+	exec 1> "${OUTFILE}"	# Open output file
+    fi
+}
+
+# Close file descriptors
+mklist_close_files () {
+    if test -n "${OUTFILE}" ; then
+	exec 1>&-
+    fi
+}
+
 # Search file via XPATH directories
 search_xpath () {
     local file="$1"
@@ -91,28 +145,9 @@ mklist_process () {
 mklist_main () {
     local rc=0	# Return code
 
-    # Set XPATH variable
-    case "${LISTTYPE}" in
-	( 'cmd' ) XPATH="${CMDLIST_PATH}" ;;
-	( 'hst' ) XPATH="${HSTLIST_PATH}" ;;
-	( * ) err "unknown list type '${LISTTYPE}'" || return 1 ;;
-    esac
-    test -n "${COMMON_PATH}" && add_var "XPATH" "${COMMON_PATH}" ':'
-
-    # Open file descriptors
-    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
-    if test -n "${OUTFILE}" ; then
-	# If output file is set then try to create it
-	( : > "${OUTFILE}" ) 2>/dev/null ||
-	    err "can't create output file '${OUTFILE}'" || return 1
-	exec 1> "${OUTFILE}"	# Open output file
-    fi
-
-    # Create list
+    mklist_init && mklist_check && mklist_open_files || return 1
     mklist_process || rc=$?
-
-    # Close file descriptors
-    test -n "${OUTFILE}" && exec 1>&-
+    mklist_close_files || return 1
 
     return ${rc}
 }
@@ -121,16 +156,6 @@ mklist_main () {
 mklist () {
     # Run the main function in a subshell to be able to override
     # global variables with the same names and redirect input/output
-    (
-	# Translate API variables to internal names
-	LISTTYPE="${MKLIST_TYPE}"
-	OUTFILE="${MKLIST_OUTFILE}"
-	ARRAY="${MKLIST_ARRAY}"
-	ELEMENTS="${MKLIST_ELEMENTS}"
-	CMDLIST_PATH="${MKLIST_FPATH}"
-	HSTLIST_PATH="${MKLIST_LPATH}"
-	COMMON_PATH="${MKLIST_CPATH}"
-	mklist_main
-    )
+    ( mklist_main )
 }
 #% endif

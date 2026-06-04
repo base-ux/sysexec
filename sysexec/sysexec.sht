@@ -14,30 +14,52 @@
 
 # Initialization subroutine
 sysexec_init () {
+    # Translate API variables
+    W_HSTLIST="${SYSEXEC_HSTFILE}"
+    W_CMDLIST="${SYSEXEC_CMDFILE}"
+    AFTER_CMD="${SYSEXEC_AFTER_CMD}"
+    BEFORE_CMD="${SYSEXEC_BEFORE_CMD}"
+    DEF_USER="${SYSEXEC_USER}"
+    OUTFILE="${SYSEXEC_OUTFILE}"
+    PREEXEC="${SYSEXEC_PREEXEC}"
+    POSTEXEC="${SYSEXEC_POSTEXEC}"
+    PRINT="${SYSEXEC_PRINT}"
+    VERBOSE="${SYSEXEC_VERBOSE}"
+
+    # Variables for 'mklist'
+    MKLIST_ARRAY="SYSEXEC_LIST"
+    MKLIST_ELEMENTS="${SYSEXEC_LIST}"
+    MKLIST_FPATH="${SYSEXEC_FPATH}"
+    MKLIST_LPATH="${SYSEXEC_LPATH}"
+    MKLIST_CPATH="${SYSEXEC_CPATH}"
+    MKLIST_MASK="${SYSEXEC_MASK}"
+    MKLIST_REGEX="${SYSEXEC_REGEX}"
+
+    # Variables for 'run_ssh'
+    RUN_SSH_EXEC="${SYSEXEC_SSH}"
+    RUN_SSH_CTLPATH="${SYSEXEC_CTLPATH}"
+    RUN_SSH_OPTIONS="${SYSEXEC_SSHOPTS}"
+    RUN_SSH_INFILE="${W_CMDLIST}"
+    RUN_SSH_OUTFILE=""		# Will be set later
+
     # Reset used variables
+    SH=""
     R_HOST=""
     R_PORT=""
     R_USER=""
     R_PREEXEC="${PREEXEC}"
     R_POSTEXEC="${POSTEXEC}"
+    R_OUTFILE="${OUTFILE}"
     P_PREEXEC=""
     P_POSTEXEC=""
     P_OUTFILE=""
 
-    # Variables for 'run_ssh'
-    RUN_SSH_INFILE="${W_CMDLIST}"
-    RUN_SSH_OUTFILE=""		# Will be set later
-
     case "${OUTFILE}" in
-	( *'%o'* ) err "unsupported pattern '%o' for outfile" || return 1 ;;
-	( *'%h'* | *'%u'* ) P_OUTFILE="true" ;;
+	( '-' ) OUTFILE="" ;;	# Consider '-' as stdin
+	( *'%'[hu]* ) P_OUTFILE="true" ;;
     esac
-    case "${PREEXEC}" in
-	( *'%h'* | *'%u'* | *'%o'* ) P_PREEXEC="true" ;;
-    esac
-    case "${POSTEXEC}" in
-	( *'%h'* | *'%u'* | *'%o'* ) P_POSTEXEC="true" ;;
-    esac
+    case "${PREEXEC}" in ( *'%'[huo]* ) P_PREEXEC="true" ;; esac
+    case "${POSTEXEC}" in ( *'%'[huo]* ) P_POSTEXEC="true" ;; esac
 }
 
 # Some checks
@@ -52,11 +74,37 @@ sysexec_check () {
 	    test -n "${PREEXEC}" || test -n "${POSTEXEC}"
     then
 	# Determine shell
-	SH=""
 	for shell in "/bin/sh" "/usr/bin/sh" "$(command -pv sh)" ; do
 	    test -x "${shell}" && SH="${shell}" && break
 	done
 	test -n "${SH}" || err "'sh' executable not found" || return 1
+    fi
+
+    case "${OUTFILE}" in
+	( *'%o'* ) err "unsupported pattern '%o' for outfile" ;;
+    esac &&
+    case "${PREEXEC}${POSTEXEC}" in
+	( *'%o'* )
+	    test -n "${OUTFILE}" ||
+		err "'%o' pattern for pre-/post-exec is set but no outfile defined"
+	    ;;
+    esac || return 1
+}
+
+# Open file descriptors
+sysexec_open_files () {
+    if test -z "${P_OUTFILE}" && test -n "${OUTFILE}" ; then
+	# Try to clear output file
+	( : > "${OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${OUTFILE}'" || return 1
+	exec 3> "${OUTFILE}"	# Open output file as fd 3
+    fi
+}
+
+# Close file descriptors
+sysexec_close_files () {
+    if test -z "${P_OUTFILE}" && test -n "${OUTFILE}" ; then
+	exec 3>&-	# Close output file
     fi
 }
 
@@ -81,26 +129,6 @@ sysexec_mklist () {
 sysexec_runcmd () {
     if test -n "$2" ; then
 	"${SH}" -c "$2" || err "'$1' command returned nonzero status"
-    fi
-}
-
-# Open file descriptors
-sysexec_open_files () {
-    if test -z "${P_OUTFILE}" ; then
-	case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
-	if test -n "${OUTFILE}" ; then
-	    # Try to clear output file
-	    ( : > "${OUTFILE}" ) 2>/dev/null ||
-		err "can't create output file '${OUTFILE}'" || return 1
-	    exec 3> "${OUTFILE}"	# Open output file as fd 3
-	fi
-    fi
-}
-
-# Close file descriptors
-sysexec_close_files () {
-    if test -z "${P_OUTFILE}" && test -n "${OUTFILE}" ; then
-	exec 3>&-	# Close output file
     fi
 }
 
@@ -132,7 +160,7 @@ sysexec_expand () {
 	case "${res}" in
 	    ( *'%h'* ) res="${res%%\%h*}${R_HOST}${res#*\%h}" ;;
 	    ( *'%u'* ) res="${res%%\%u*}${R_USER}${res#*\%u}" ;;
-	    ( *'%o'* ) res="${res%%\%o*}${RUN_SSH_OUTFILE}${res#*\%o}" ;;
+	    ( *'%o'* ) res="${res%%\%o*}${R_OUTFILE}${res#*\%o}" ;;
 	    ( * ) break ;;
 	esac
     done
@@ -146,7 +174,7 @@ sysexec_process_host () {
 	( * ) R_HOST="$1" ; R_USER="${DEF_USER}" ; R_PORT="22" ;;
     esac
 
-    test -n "${P_OUTFILE}" && RUN_SSH_OUTFILE="$(sysexec_expand "${OUTFILE}")"
+    test -n "${P_OUTFILE}" && R_OUTFILE="$(sysexec_expand "${OUTFILE}")"
     test -n "${P_PREEXEC}" && R_PREEXEC="$(sysexec_expand "${PREEXEC}")"
     test -n "${P_POSTEXEC}" && R_POSTEXEC="$(sysexec_expand "${POSTEXEC}")"
 
@@ -158,6 +186,7 @@ sysexec_process_host () {
     RUN_SSH_HOST="${R_HOST}"
     RUN_SSH_PORT="${R_PORT}"
     RUN_SSH_USER="${R_USER}"
+    test -n "${P_OUTFILE}" && RUN_SSH_OUTFILE="${R_OUTFILE}"
 
     # Error status for run_ssh will be ignored
     if test -z "${P_OUTFILE}" && test -n "${OUTFILE}" ; then
@@ -165,7 +194,7 @@ sysexec_process_host () {
 	run_ssh >&3
     else
 	# Otherwise the output will be redirected to stdout or
-	# individual output file by run_ssh if OUTPUT is pattern
+	# individual output file by run_ssh if OUTFILE is pattern
 	run_ssh
     fi
 
@@ -202,30 +231,6 @@ sysexec_main () {
 sysexec () {
     # Run the main function in a subshell to be able to override
     # global variables with the same names and redirect input/output
-    (
-	# Translate API variables
-	W_HSTLIST="${SYSEXEC_HSTFILE}"
-	W_CMDLIST="${SYSEXEC_CMDFILE}"
-	HOSTLIST_GRP=""		# Run 'hostlist' in 'host' mode
-	HOSTLIST_MASK="${SYSEXEC_MASK}"
-	HOSTLIST_REGEX="${SYSEXEC_REGEX}"
-	MKLIST_ARRAY="SYSEXEC_LIST"
-	MKLIST_ELEMENTS="${SYSEXEC_LIST}"
-	MKLIST_FPATH="${SYSEXEC_FPATH}"
-	MKLIST_LPATH="${SYSEXEC_LPATH}"
-	MKLIST_CPATH="${SYSEXEC_CPATH}"
-	RUN_SSH_EXEC="${SYSEXEC_SSH}"
-	RUN_SSH_CTLPATH="${SYSEXEC_CTLPATH}"
-	RUN_SSH_OPTIONS="${SYSEXEC_SSHOPTS}"
-	AFTER_CMD="${SYSEXEC_AFTER_CMD}"
-	BEFORE_CMD="${SYSEXEC_BEFORE_CMD}"
-	DEF_USER="${SYSEXEC_USER}"
-	OUTFILE="${SYSEXEC_OUTFILE}"
-	PREEXEC="${SYSEXEC_PREEXEC}"
-	POSTEXEC="${SYSEXEC_POSTEXEC}"
-	PRINT="${SYSEXEC_PRINT}"
-	VERBOSE="${SYSEXEC_VERBOSE}"
-	sysexec_main
-    )
+    ( sysexec_main )
 }
 #% endif

@@ -5,6 +5,74 @@
 #% include "err.sht"
 #% include "check_file.sht"
 
+####
+
+# Initialization subroutine
+run_ssh_init () {
+    # Translate API variables to internal names
+    INFILE="${RUN_SSH_INFILE}"
+    OUTFILE="${RUN_SSH_OUTFILE}"
+    SSH="${RUN_SSH_EXEC:-"$(command -pv ssh)"}"
+    SSH_HOST="${RUN_SSH_HOST}"
+    SSH_PORT="${RUN_SSH_PORT:-22}"
+    SSH_USER="${RUN_SSH_USER:-"${USER}"}"
+    SSH_CTLPATH="${RUN_SSH_CTLPATH:-"${HOME}"}"
+    SSH_OPTIONS="${RUN_SSH_OPTIONS}"
+
+    # Reset used variables
+    SSH_RCMD=""
+
+    # Consider '-' as stdin
+    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
+}
+
+# Check subroutine
+run_ssh_check () {
+    # Check required variables
+    test -n "${SSH}" || err "can't find 'ssh' program" || return 1
+    test -n "${SSH_HOST}" || err "remote host is not set" || return 1
+    test -n "${SSH_USER}" || err "remote user is not set" || return 1
+    test -d "${SSH_CTLPATH}" || err "can't access directory: ${SSH_CTLPATH}" || return 1
+    test -n "${INFILE}" || err "input file is not set" || return 1
+}
+
+# Determine if remote shell is available
+run_ssh_set_rcmd () {
+    local ret=""
+    local rc=0
+
+    # Run simple command at the remote host
+    # If ssh returns 255 (ssh error) then leave function with error status
+    # Otherwise 'rc' value (error code from remote host) is ignored
+    # and output from remote host is analyzed
+    SSH_RCMD="/bin/sh -c 'printf OK'"
+    ret="$(run_ssh_exec -n 2>/dev/null)" || rc=$?
+    case "${rc}" in ( 255 ) return ${rc} ;; esac
+    case "${ret}" in
+	( 'OK' ) SSH_RCMD="/bin/sh -s" ;;
+	(  *   ) SSH_RCMD="" ;;
+    esac
+}
+
+# Open file descriptors
+run_ssh_open_files () {
+    # Process output file if defined
+    if test -n "${OUTFILE}" ; then
+	# If output file is set then try to create it
+	( : > "${OUTFILE}" ) 2>/dev/null ||
+	    err "can't create output file '${OUTFILE}'" || return 1
+	exec 1> "${OUTFILE}"	# Open output file
+    fi
+    check_file "${INFILE}" || err "can't open file: ${INFILE}" || return 1
+    exec 0< "${INFILE}"		# Open input file
+}
+
+# Close file descriptors
+run_ssh_close_files () {
+    test -n "${OUTFILE}" && exec 1>&-
+    exec 0<&-
+}
+
 # Execute commands on remote host from stdin
 run_ssh_exec () {
     # Hardcoded values for options can be overwritten
@@ -28,59 +96,12 @@ run_ssh_exec () {
 	"${SSH_HOST}" "${SSH_RCMD}"
 }
 
-# Determine if remote shell is available
-run_ssh_set_rcmd () {
-    local ret=""
-    local rc=0
-
-    # Run simple command at the remote host
-    # If ssh returns 255 (ssh error) then leave function with error status
-    # Otherwise 'rc' value (error code from remote host) is ignored
-    # and output from remote host is analyzed
-    SSH_RCMD="/bin/sh -c 'printf OK'"
-    ret="$(run_ssh_exec -n 2>/dev/null)" || rc=$?
-    case "${rc}" in ( 255 ) return ${rc} ;; esac
-    case "${ret}" in
-	( 'OK' ) SSH_RCMD="/bin/sh -s" ;;
-	(  *   ) SSH_RCMD="" ;;
-    esac
-}
-
-# Some checks
-run_ssh_check () {
-    # Check required variables
-    test -n "${SSH}" || err "can't find 'ssh' program" || return 1
-    test -n "${SSH_HOST}" || err "remote host is not set" || return 1
-    test -n "${SSH_USER}" || err "remote user is not set" || return 1
-    test -d "${SSH_CTLPATH}" || err "can't access directory: ${SSH_CTLPATH}" || return 1
-    test -n "${INFILE}" || err "input file is not set" || return 1
-    case "${OUTFILE}" in ( '-' ) OUTFILE="" ;; esac
-}
-
-# Open file descriptors
-run_ssh_open_files () {
-    # Process output file if defined
-    if test -n "${OUTFILE}" ; then
-	# If output file is set then try to create it
-	( : > "${OUTFILE}" ) 2>/dev/null ||
-	    err "can't create output file '${OUTFILE}'" || return 1
-	exec 1> "${OUTFILE}"	# Open output file
-    fi
-    check_file "${INFILE}" || err "can't open file: ${INFILE}" || return 1
-    exec 0< "${INFILE}"		# Open input file
-}
-
-# Close file descriptors
-run_ssh_close_files () {
-    test -n "${OUTFILE}" && exec 1>&-
-    exec 0<&-
-}
-
 # Main run_ssh function
 run_ssh_main () {
     local rc=0
 
-    run_ssh_check && run_ssh_set_rcmd && run_ssh_open_files || return 1
+    run_ssh_init && run_ssh_check && run_ssh_set_rcmd &&
+	run_ssh_open_files || return 1
 
     # Set additional options for ssh
     test -n "${SSH_OPTIONS}" && eval "set -- ${SSH_OPTIONS}"
@@ -88,24 +109,13 @@ run_ssh_main () {
     # Execute commands from file
     run_ssh_exec ${1:+"$@"} || rc=$?	# Ignore error status from ssh for now
 
-    run_ssh_close_files
+    run_ssh_close_files || return 1
 }
 
 # API function for run_ssh
 run_ssh () {
     # Run the main function in a subshell to be able to override
     # global variables with the same names and redirect input/output
-    (
-	# Translate API variables to internal names
-	INFILE="${RUN_SSH_INFILE}"
-	OUTFILE="${RUN_SSH_OUTFILE}"
-	SSH="${RUN_SSH_EXEC:-"$(command -pv ssh)"}"
-	SSH_HOST="${RUN_SSH_HOST}"
-	SSH_PORT="${RUN_SSH_PORT:-22}"
-	SSH_USER="${RUN_SSH_USER:-"${USER}"}"
-	SSH_CTLPATH="${RUN_SSH_CTLPATH:-"${HOME}"}"
-	SSH_OPTIONS="${RUN_SSH_OPTIONS}"
-	run_ssh_main
-    )
+    ( run_ssh_main )
 }
 #% endif
